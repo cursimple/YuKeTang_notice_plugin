@@ -1,0 +1,8 @@
+{
+  "algorithm": "SHA-256",
+  "files": {
+    "assets/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "main.js": "2c41e85e6449a4951a21dd95324cdd64dc5fdf0be5fb878c29e9d326e7d149c6",
+    "manifest.json": "a94e30004cd8ccd45deec40be5201eb191e7dde657fb3f03d2d717bf02f281f4"
+  }
+}

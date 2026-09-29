@@ -1,0 +1,40 @@
+name: release
+
+# 推 v* 标签就打包发版：tag 必须和 manifest.json 里的 version 对上，
+# Release 里放组件 zip 和 manifest.json（{filename, version}），课简的插件市场按后者找最新版
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 校验 tag 与版本号一致
+        run: |
+          version="$(node -p "require('./plugin-packages/yuketang-notice/manifest.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "tag ${GITHUB_REF_NAME} 和 manifest 里的 v${version} 不一致" >&2
+            exit 1
+          fi
+
+      - name: 单测
+        run: node --test test/
+
+      - name: 打包
+        run: bash scripts/pack.sh
+
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.zip dist/manifest.json \
+            --title "${GITHUB_REF_NAME}" --generate-notes
