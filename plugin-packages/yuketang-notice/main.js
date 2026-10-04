@@ -18,8 +18,8 @@ const DEADLINE_TTL_MS = 12 * 60 * 60 * 1000;
 /** 交过的试卷不会再变回未交，缓存下来就不用每次都去问 cover */
 const EXAM_DONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** 每门课最多拿这么多条公告；太老的公告没有提醒价值 */
-const ANNOUNCEMENT_LIMIT = 10;
+/** 分页读取公告，不再只保留最近十条；图片与附件地址随条目一起交给宿主。 */
+const ANNOUNCEMENT_PAGE_SIZE = 30;
 
 /** 评测类型 id → 名称（score_detail 里的 evaluation_id） */
 const EVALUATION_LABELS = { 11: "作业", 2000: "章节测试", 12: "考试" };
@@ -64,7 +64,9 @@ export async function sync(ctx) {
     throw error;
   }
 
+  const latestTerm = Math.max(0, ...courses.map((course) => course.term || 0));
   const picked = pickCourses(courses, settings.onlyCurrentTerm !== false);
+  const historicalAnnouncements = settings.syncHistoricalAnnouncements !== false;
   const items = [];
   const failures = [];
 
@@ -73,7 +75,8 @@ export async function sync(ctx) {
       const jobs = [];
       if (settings.syncHomework !== false) jobs.push(homeworkOf(api, course, state, now));
       if (settings.syncExam !== false) jobs.push(examsOf(api, course, state, now));
-      if (settings.syncAnnouncement !== false) jobs.push(announcementsOf(api, course));
+      if (settings.syncAnnouncement !== false &&
+          (historicalAnnouncements || picked.includes(course))) jobs.push(announcementsOf(api, course));
       for (const result of await Promise.allSettled(jobs)) {
         if (result.status === "fulfilled") {
           items.push(...result.value);
@@ -87,6 +90,24 @@ export async function sync(ctx) {
   } catch (error) {
     if (error instanceof LoginRequiredError) return { loginRequired: true };
     throw error;
+  }
+
+  // 往期课程只同步公告；作业和考试仍以当前学期为主，避免历史内容抢占首页。
+  if (settings.syncAnnouncement !== false && historicalAnnouncements) {
+    const oldCourses = courses.filter((course) => !picked.includes(course));
+    try {
+      await runPool(oldCourses, CONCURRENCY, async (course) => {
+        try {
+          items.push(...(await announcementsOf(api, course)).map((item) => ({ ...item, historical: true })));
+        } catch (error) {
+          if (error instanceof LoginRequiredError) throw error;
+          failures.push(`${course.name}: ${messageOf(error)}`);
+        }
+      });
+    } catch (error) {
+      if (error instanceof LoginRequiredError) return { loginRequired: true };
+      throw error;
+    }
   }
 
   if (settings.syncSystemMessage === true) {
@@ -143,6 +164,7 @@ async function homeworkOf(api, course, state, now) {
       done,
       summary: [label, chapter, progressText(leaf)].filter(Boolean).join(" · "),
       url: api.courseUrl(course.cid),
+      historical: false,
     });
   });
   return items;
@@ -180,28 +202,31 @@ async function examsOf(api, course, state, now) {
         exam.total_score ? `${exam.total_score} 分` : "",
       ].filter(Boolean).join(" · "),
       url: api.courseUrl(course.cid),
+      historical: false,
     });
   });
   return items;
 }
 
 async function announcementsOf(api, course) {
-  const rows = await api.announcements(course.cid, ANNOUNCEMENT_LIMIT);
-  return rows.map((row) => {
-    const content = row.content || {};
-    const text = htmlToText(content.text || content.app_text || "");
+  const rows = await api.announcements(course.cid);
+  return rows.filter((row) => row && row.id != null).map((row) => {
+    const assets = noticeContent(row.content, api.courseUrl(course.cid), row);
     return {
       id: `announcement:${course.cid}:${row.id}`,
       type: "announcement",
-      title: (row.topic_name || "公告").trim(),
+      title: String(row.topic_name || "公告").trim() || "公告",
       course: course.name,
       category: "公告",
       publishAt: toMillis(row.app_publish_time || row.publish_time),
-      done: Boolean(row.is_read),
+      done: row.is_read === true || row.is_read === 1 || row.is_read === "1",
       author: row.user_info?.name || "",
-      summary: text.slice(0, 120),
-      content: text.slice(0, 4000),
+      summary: assets.text.slice(0, 160),
+      content: assets.text,
+      images: assets.images,
+      attachments: assets.attachments,
       url: api.courseUrl(course.cid),
+      historical: false,
     };
   });
 }
@@ -209,7 +234,8 @@ async function announcementsOf(api, course) {
 async function systemMessagesOf(api) {
   const rows = await api.systemMessages();
   return rows.map((row) => {
-    const text = htmlToText(row.content || "");
+    const assets = noticeContent(row.content, api.homeUrl(), row);
+    const text = assets.text;
     return {
       id: `notice:${row.id}`,
       type: "notice",
@@ -219,9 +245,12 @@ async function systemMessagesOf(api) {
       publishAt: toMillis(row.start_time),
       done: row.push_status !== 2,
       author: row.creator_name || "",
-      summary: text.slice(0, 120),
-      content: text.slice(0, 4000),
+      summary: text.slice(0, 160),
+      content: text,
+      images: assets.images,
+      attachments: assets.attachments,
       url: typeof row.link === "string" && /^https?:/.test(row.link) ? row.link : api.homeUrl(),
+      historical: false,
     };
   });
 }
@@ -366,12 +395,30 @@ function createApi(ctx) {
       };
     },
 
-    async announcements(cid, limit) {
-      const json = await getJson(
-        `/v/discussion/v2/announcements/?cid=${cid}&content=&limit=${limit}&offset=0&type=9`,
-      );
-      const rows = json?.data?.results;
-      return Array.isArray(rows) ? rows : [];
+    async announcements(cid) {
+      const rows = [];
+      const seen = new Set();
+      let offset = 0;
+      while (true) {
+        const json = await getJson(
+          `/v/discussion/v2/announcements/?cid=${cid}&content=&limit=${ANNOUNCEMENT_PAGE_SIZE}&offset=${offset}&type=9`,
+        );
+        const data = json?.data;
+        const page = data?.results;
+        if (!Array.isArray(page)) throw new Error("公告列表格式不正确");
+        let added = 0;
+        for (const row of page) {
+          if (row?.id == null || seen.has(String(row.id))) continue;
+          seen.add(String(row.id));
+          rows.push(row);
+          added++;
+        }
+        offset += page.length;
+        const total = Number(data.count ?? data.total);
+        if (!page.length || !added || (Number.isFinite(total) && offset >= total)) break;
+        if (!data.next && page.length < ANNOUNCEMENT_PAGE_SIZE) break;
+      }
+      return rows;
     },
 
     async systemMessages() {
@@ -429,20 +476,93 @@ function toMillis(value) {
   return Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h) - 8, Number(mi), Number(s));
 }
 
+/** 正文、上传图片及所有附件都独立保留；只接受可读取的网页资源地址。 */
+function noticeContent(raw, base, row = {}) {
+  let content = raw;
+  if (typeof raw === "string" && /^\s*\{/.test(raw)) {
+    try { content = JSON.parse(raw); } catch (_) { /* 普通文本仍按正文读取 */ }
+  }
+  const obj = content && typeof content === "object" ? content : {};
+  const html = typeof content === "string" ? content : String(obj.text || obj.app_text || "");
+  const images = [];
+  const attachments = [];
+  const imageUrls = new Set();
+  const fileUrls = new Set();
+  const addImage = (rawImage) => {
+    const value = typeof rawImage === "string" ? { url: rawImage } : rawImage || {};
+    const url = assetUrl(value.url || value.file_url || value.src || value.image_url, base);
+    if (!url || imageUrls.has(url)) return;
+    imageUrls.add(url);
+    images.push({ url, name: String(value.name || value.alt || "") });
+  };
+  const addAttachment = (rawFile) => {
+    const value = typeof rawFile === "string" ? { url: rawFile } : rawFile || {};
+    const url = assetUrl(value.file_url || value.url || value.download_url || value.href, base);
+    if (!url || fileUrls.has(url)) return;
+    fileUrls.add(url);
+    let inferredName = "";
+    try { inferredName = decodeURIComponent(new URL(url).pathname.split("/").pop() || ""); } catch (_) {}
+    const size = Number(value.file_size ?? value.size);
+    attachments.push({
+      url,
+      name: String(value.file_name || value.name || value.filename || inferredName || "附件"),
+      type: String(value.file_type || value.type || value.mime_type || "").toLowerCase(),
+      size: Number.isFinite(size) && size > 0 ? Math.trunc(size) : null,
+    });
+  };
+  const values = (value) => Array.isArray(value) ? value : value ? [value] : [];
+  for (const source of [obj, row]) {
+    for (const key of ["upload_images", "images", "image_list"]) values(source[key]).forEach(addImage);
+    for (const key of ["accessory_list", "attachments", "file_list"]) values(source[key]).forEach(addAttachment);
+  }
+  // 正文内嵌图和链接附件不一定出现在上面的结构化字段里。
+  for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
+    addImage({ url: htmlAttribute(match[0], "data-src") || htmlAttribute(match[0], "src"), alt: htmlAttribute(match[0], "alt") });
+  }
+  for (const match of html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const url = htmlAttribute(match[0].slice(0, match[0].indexOf(">") + 1), "href");
+    const parsed = assetUrl(url, base);
+    const fileLink = parsed && /\.(pdf|docx?|xlsx?|pptx?|zip|rar|7z|txt|csv|jpe?g|png|gif|webp|mp[34]|wav|ogg)(?:$|[?#])/i.test(parsed);
+    if (fileLink || /\bdownload(?:\s|=|>)/i.test(match[1])) addAttachment({ url, name: htmlToText(match[2]) });
+  }
+  return { text: htmlToText(html), images, attachments };
+}
+
+function assetUrl(value, base) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  try {
+    const url = new URL(decodeHtml(value.trim()), base);
+    if (!/^https?:$/.test(url.protocol) || url.username || url.password) return "";
+    // 图片和下载走 HTTPS，避免明文资源被 Android 拦截。
+    url.protocol = "https:";
+    return url.href;
+  } catch (_) { return ""; }
+}
+
+function htmlAttribute(tag, name) {
+  const match = new RegExp(`(?:\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag);
+  return decodeHtml(match ? (match[1] ?? match[2] ?? match[3] ?? "") : "");
+}
+
+function decodeHtml(text) {
+  return String(text || "")
+    .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (_, n) => {
+      const code = n[0].toLowerCase() === "x" ? parseInt(n.slice(1), 16) : Number(n);
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
+    })
+    .replace(/&nbsp;/gi, " ").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"').replace(/&apos;|&#39;/gi, "'").replace(/&amp;/gi, "&");
+}
+
 function htmlToText(html) {
-  return String(html || "")
+  return decodeHtml(String(html || "")
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
+    .replace(/<!--[^]*?-->/g, "")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|h\d)>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/<\/(p|div|li|h\d|tr)>/gi, "\n")
+    .replace(/<\/td>/gi, "\t")
+    .replace(/<[^>]+>/g, ""))
+    .replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function cookieFromDocument(name) {
@@ -493,4 +613,4 @@ function messageOf(error) {
 }
 
 // 单测要用到的纯函数；宿主只认 checkLogin / sync
-export const __test__ = { toMillis, htmlToText, exerciseDone, pickCourses, siteOf };
+export const __test__ = { toMillis, htmlToText, exerciseDone, pickCourses, siteOf, noticeContent, assetUrl };

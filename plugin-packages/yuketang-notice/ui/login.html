@@ -1,0 +1,22 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="component.css"><title>登录雨课堂</title></head><body class="locked"><main class="page login-page" id="app">
+<header class="bar"><button class="icon-btn" id="back" aria-label="返回"></button><h1>登录</h1></header>
+<div class="stagger" style="display:contents">
+<section class="login-hero" style="--i:0"><div class="orb" id="hero-orb"></div><div><h2>连接你的雨课堂</h2><p>作业、考试和公告由课简提醒</p></div></section>
+<div class="group" id="site-picker" style="--i:1"></div>
+<section class="login-card" id="login-card" style="--i:2">
+<div class="tabs" role="tablist" aria-label="登录方式"><span class="seg-thumb" aria-hidden="true"></span><button id="phone-tab" role="tab" aria-selected="true" aria-controls="phone-panel">手机号</button><button id="qr-tab" role="tab" aria-selected="false" aria-controls="qr-panel">微信扫码</button></div>
+<div class="login-body">
+<form id="phone-panel" class="login-form">
+<div class="field"><label for="mobile">手机号</label><div class="affix"><span class="prefix">+86</span><input id="mobile" type="tel" inputmode="tel" autocomplete="tel" placeholder="绑定雨课堂的手机号" maxlength="11" required></div></div>
+<div class="field"><label for="code">短信验证码</label><div class="inline"><input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位验证码" maxlength="8"><button type="button" class="secondary" id="send">获取验证码</button></div></div>
+<button type="submit" class="primary wide" id="verify">登录并连接</button>
+</form>
+<div id="qr-panel" role="tabpanel" hidden><div class="qr-wrap"><div id="qr-area" class="qr-frame"><span class="spinner"></span></div><p class="qr-caption">打开微信「扫一扫」，在手机上确认登录</p><div class="status-line"><span class="qr-timer" id="qr-timer" hidden></span><span id="qr-countdown" class="countdown"></span><button class="icon-btn" id="refresh" aria-label="刷新二维码"></button></div></div></div>
+</div>
+</section>
+<div id="status" class="banner info" role="status" aria-live="polite" hidden></div>
+<div id="error" class="banner err" role="alert" hidden><span id="error-text" style="flex:1;min-width:0"></span><button type="button" class="icon-btn" id="copy-error" aria-label="复制失败原因" style="width:32px;height:32px;margin:-6px -6px -6px 0;color:inherit"></button></div>
+<div class="login-actions" hidden><button id="retry-session" class="secondary" hidden>重新检查登录结果</button><button id="back-to-settings" class="secondary" hidden>返回组件设置</button></div>
+<div class="privacy" id="privacy" style="--i:3"><span id="privacy-icon"></span><span id="privacy-text">验证码只提交给雨课堂，课简不保存你的密码。获取短信前需要先完成雨课堂官方的安全验证。</span></div>
+</div>
+</main><script type="module" src="login.js"></script></body></html>

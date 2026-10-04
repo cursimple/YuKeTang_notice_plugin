@@ -3,9 +3,9 @@
   "kind": "extension",
   "name": "雨课堂通知",
   "publisher": "cursimple",
-  "version": "1.0.0",
-  "versionCode": 100,
-  "apiVersion": 3,
+  "version": "1.2.0",
+  "versionCode": 120,
+  "apiVersion": 4,
   "entry": "main.js",
   "description": "登录雨课堂后，老师发布的作业、考试和课程公告由课简来提醒：新内容通知、截止前提醒、侧边栏日历，还能自动写进课表事务。",
   "homepage": "https://github.com/cursimple/YuKeTang_notice_plugin",
@@ -19,7 +19,9 @@
     "changjiang.yuketang.cn",
     "www.yuketang.cn",
     "huanghe.yuketang.cn",
-    "pro.yuketang.cn"
+    "pro.yuketang.cn",
+    "turing.captcha.qcloud.com",
+    "turing.captcha.gtimg.com"
   ],
   "extension": {
     "title": "雨课堂",
@@ -28,10 +30,30 @@
     "syncIntervalMinutes": 60,
     "loginViewportWidth": 960,
     "feedTypes": [
-      { "id": "homework", "label": "作业", "color": "#2563EB" },
-      { "id": "exam", "label": "考试", "color": "#DC2626" },
-      { "id": "announcement", "label": "公告", "color": "#D97706" },
-      { "id": "notice", "label": "系统消息", "color": "#7C3AED" }
+      {
+        "id": "homework",
+        "label": "作业",
+        "color": "#2563EB",
+        "kind": "task"
+      },
+      {
+        "id": "exam",
+        "label": "考试",
+        "color": "#DC2626",
+        "kind": "task"
+      },
+      {
+        "id": "announcement",
+        "label": "公告",
+        "color": "#D97706",
+        "kind": "notice"
+      },
+      {
+        "id": "notice",
+        "label": "系统消息",
+        "color": "#7C3AED",
+        "kind": "notice"
+      }
     ],
     "settings": [
       {
@@ -42,19 +64,80 @@
         "default": "changjiang.yuketang.cn",
         "requiresRelogin": true,
         "options": [
-          { "value": "changjiang.yuketang.cn", "label": "长江雨课堂" },
-          { "value": "www.yuketang.cn", "label": "雨课堂" },
-          { "value": "huanghe.yuketang.cn", "label": "黄河雨课堂" },
-          { "value": "pro.yuketang.cn", "label": "荷塘雨课堂" }
+          {
+            "value": "changjiang.yuketang.cn",
+            "label": "长江雨课堂"
+          },
+          {
+            "value": "www.yuketang.cn",
+            "label": "雨课堂"
+          },
+          {
+            "value": "huanghe.yuketang.cn",
+            "label": "黄河雨课堂"
+          },
+          {
+            "value": "pro.yuketang.cn",
+            "label": "荷塘雨课堂"
+          }
         ]
       },
-      { "key": "syncHomework", "type": "switch", "label": "作业与章节测试", "description": "带截止时间，可以截止前提醒", "default": true },
-      { "key": "syncExam", "type": "switch", "label": "考试", "description": "试卷的开考与截止时间", "default": true },
-      { "key": "syncAnnouncement", "type": "switch", "label": "课程公告", "description": "老师在课程里发的公告", "default": true },
-      { "key": "syncSystemMessage", "type": "switch", "label": "平台系统消息", "description": "雨课堂官方的系统通知，大多和课程无关", "default": false },
-      { "key": "onlyCurrentTerm", "type": "switch", "label": "只看当前学期", "description": "往期课程不再提醒", "default": true },
-      { "key": "hideFinished", "type": "switch", "label": "隐藏已完成", "description": "做完的作业、交过的试卷、读过的公告不再显示", "default": false }
-    ]
+      {
+        "key": "syncHomework",
+        "type": "switch",
+        "label": "作业与章节测试",
+        "description": "带截止时间，可以截止前提醒",
+        "default": true
+      },
+      {
+        "key": "syncExam",
+        "type": "switch",
+        "label": "考试",
+        "description": "试卷的开考与截止时间",
+        "default": true
+      },
+      {
+        "key": "syncAnnouncement",
+        "type": "switch",
+        "label": "课程公告",
+        "description": "老师在课程里发的公告",
+        "default": true
+      },
+      {
+        "key": "syncHistoricalAnnouncements",
+        "type": "switch",
+        "label": "同步往期公告",
+        "description": "当前学期优先；往期课程只同步公告，按分页读取并在日历中灰色显示",
+        "default": true
+      },
+      {
+        "key": "syncSystemMessage",
+        "type": "switch",
+        "label": "平台系统消息",
+        "description": "雨课堂官方的系统通知，大多和课程无关",
+        "default": false
+      },
+      {
+        "key": "onlyCurrentTerm",
+        "type": "switch",
+        "label": "只看当前学期",
+        "description": "往期课程不再提醒",
+        "default": true
+      },
+      {
+        "key": "hideFinished",
+        "type": "switch",
+        "label": "隐藏已完成",
+        "description": "做完的作业、交过的试卷、读过的公告不再显示",
+        "default": false
+      }
+    ],
+    "ui": {
+      "entry": "ui/feed.html",
+      "type": "html",
+      "settingsEntry": "ui/settings.html",
+      "loginEntry": "ui/login.html"
+    }
   },
   "limits": {
     "timeoutMs": 90000,

@@ -31,8 +31,8 @@ fs.writeFileSync(path.join(src, "checksums.json"), JSON.stringify({ algorithm: "
 console.log(`checksums.json: ${Object.keys(files).length} files`);
 NODE
 
-rm -rf "$out"
 mkdir -p "$out"
+rm -f "$out/$zip_name"
 (cd "$src" && zip -qrX "$out/$zip_name" . -x '*.DS_Store')
 printf '{\n  "filename": "%s",\n  "version": "v%s"\n}\n' "$zip_name" "$version" > "$out/manifest.json"
 echo "packed: dist/$zip_name"

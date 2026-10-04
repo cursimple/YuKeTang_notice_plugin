@@ -2,7 +2,17 @@
   "algorithm": "SHA-256",
   "files": {
     "assets/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "main.js": "2c41e85e6449a4951a21dd95324cdd64dc5fdf0be5fb878c29e9d326e7d149c6",
-    "manifest.json": "a94e30004cd8ccd45deec40be5201eb191e7dde657fb3f03d2d717bf02f281f4"
+    "main.js": "1f363734d0b3a94b9080cda8a0181b73afc4a15faa84aaf9172978041186a980",
+    "manifest.json": "1064dcd9b4cc22bd617bef35180d7cc815e710c4c3feb9b8d08fb0d0dd18d07a",
+    "ui/auth.js": "887a065b22a70f7c33f7284c70fcce6bd3d01c8485443c4e3909d2dd7d390be0",
+    "ui/component.css": "c35b604b1b99a69491fb86a64a26fa05b292b16bf623d6c8d806bcca30aaf80f",
+    "ui/feed-model.js": "299cd1bd057e1537a66f805a8d7d01a8c628be7b76ddcc8d61c4995dfbf803c4",
+    "ui/feed.html": "a39706cec424d6817e971913a41acd37be17144d73f1aea0769173dc92414c86",
+    "ui/feed.js": "e83d5567b1786428056e87a03e822fcb33ab88134ced61d92bc54b2285155587",
+    "ui/login.html": "2f5ab0ab874ad42b5643029e92a1e371eaf57a8693f47b06b620cf44c967e405",
+    "ui/login.js": "b0c555ff963373e510a3bc9d42bffa25d2a0953279bbbfffc9dc23c09df1202f",
+    "ui/settings.html": "23e62eed089246f6789b05aad8b58ce9cda795753990e04aee908b7100363c55",
+    "ui/settings.js": "61139a9b47ed1d7b4150c3b2c5b55dc625f3da6435b0eb0ab6e1ee47ea4a582b",
+    "ui/shared.js": "46556be58f964a6db78fa512f97345209b92c40661f7ec711519cb02f715e24c"
   }
 }

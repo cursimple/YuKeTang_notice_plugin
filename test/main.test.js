@@ -80,6 +80,13 @@ function fullRoutes(overrides = {}) {
       },
     },
     "/v/discussion/v2/announcements/?cid=102": { data: { results: [] } },
+    "/v/discussion/v2/announcements/?cid=99": {
+      data: {
+        results: [
+          { id: 91, topic_name: "往期资料", content: { text: "<p>上一学期资料</p>" }, user_info: { name: "旧老师" }, app_publish_time: "2025-03-01 09:00:00", is_read: true },
+        ],
+      },
+    },
     ...overrides,
   };
 }
@@ -104,7 +111,7 @@ test("checkLogin：登录了就带回账号，并用课程里的学校 id 填 v3
   assert.equal(basic.headers["X-CSRFToken"], "csrf-123");
 });
 
-test("sync：作业、考试、公告都转成条目，只拉当前学期", async () => {
+test("sync：当前学期优先，同时保留往期公告，不拉往期作业考试", async () => {
   const ctx = makeCtx(fullRoutes());
   const result = await sync(ctx);
   assert.equal(result.loginRequired, undefined);
@@ -135,8 +142,10 @@ test("sync：作业、考试、公告都转成条目，只拉当前学期", asyn
   assert.equal(ann.author, "王老师");
   assert.equal(ann.publishAt, Date.UTC(2026, 8, 28, 12, 15, 0));
 
-  // 往期课程（term 202502）不去拉
-  assert.ok(!ctx.calls.some((c) => c.url.includes("/99/") || c.url.includes("cid=99")));
+  const old = byId["announcement:99:91"];
+  assert.equal(old.historical, true);
+  assert.equal(old.content, "上一学期资料");
+  assert.ok(!ctx.calls.some((c) => c.url.includes("sku_list") && c.url.includes("99")));
   assert.equal(result.account.id, "52376675");
 });
 
@@ -165,7 +174,8 @@ test("sync：某门课接口报错只记一笔，其余照常返回", async () =
   const ctx = makeCtx(fullRoutes({ "/v/discussion/v2/announcements/?cid=101": () => response(500, "boom") }));
   const result = await sync(ctx);
   assert.ok(result.items.some((it) => it.id === "homework:101:1"));
-  assert.ok(!result.items.some((it) => it.type === "announcement"));
+  assert.ok(!result.items.some((it) => it.id === "announcement:101:31"));
+  assert.ok(result.items.some((it) => it.id === "announcement:99:91"));
   assert.match(result.message, /没取到/);
 });
 
