@@ -206,3 +206,46 @@ test("toMillis：毫秒、秒、北京时间字符串都认", () => {
   assert.equal(toMillis(""), null);
   assert.equal(toMillis("随便"), null);
 });
+
+test('已读：读取官网 topic 详情并回查已读，不使用教师阅读名单写入接口', async () => {
+  const { performItemAction } = await import('../plugin-packages/yuketang-notice/main.js');
+  let detailRead = false;
+  const ctx = makeCtx({
+    '/v2/api/web/courses/list': COURSES,
+    '/api/v3/user/basic-info': BASIC,
+    '/v/discussion/v2/topic/31/': (path, init) => {
+      assert.match(path, /classroom_id=101/);
+      assert.equal(init.method, 'GET');
+      assert.equal(init.headers['X-CSRFToken'], 'csrf-123');
+      detailRead = true;
+      return response(200, JSON.stringify({success:true,data:{data:{topic:{id:31}}}}));
+    },
+    '/v/discussion/v2/announcements/': () => response(200, JSON.stringify({data:{count:1,results:[{id:31,is_read:detailRead}]}})),
+  });
+  ctx.action = {type:'markRead',itemId:'announcement:101:31'};
+  const result = await performItemAction(ctx);
+  assert.deepEqual(result, {itemId:'announcement:101:31',done:true});
+  assert.equal(ctx.calls.some(x => x.url.includes('notice/read/info')), false);
+});
+
+test('已读：官方回查仍未读时不能返回虚假的已读状态', async () => {
+  const { performItemAction } = await import('../plugin-packages/yuketang-notice/main.js');
+  const ctx = makeCtx({
+    '/v2/api/web/courses/list': COURSES,
+    '/api/v3/user/basic-info': BASIC,
+    '/v/discussion/v2/topic/31/': {success:true,data:{data:{topic:{id:31}}}},
+    '/v/discussion/v2/announcements/': {data:{count:1,results:[{id:31,is_read:false}]}},
+  });
+  ctx.action = {type:'markRead',itemId:'announcement:101:31'};
+  await assert.rejects(performItemAction(ctx), /官方尚未确认/);
+});
+
+test('已读：接口失败和非法 ID 不修改状态', async () => {
+  const { performItemAction } = await import('../plugin-packages/yuketang-notice/main.js');
+  const ctx = makeCtx({'/v2/api/web/courses/list':COURSES,'/api/v3/user/basic-info':BASIC,
+    '/v/discussion/v2/topic/31/': () => response(500, '{}')});
+  ctx.action={type:'markRead',itemId:'announcement:101:31'};
+  await assert.rejects(performItemAction(ctx), /HTTP 500/);
+  ctx.action.itemId='announcement:101:31?other';
+  await assert.rejects(performItemAction(ctx), /不支持/);
+});

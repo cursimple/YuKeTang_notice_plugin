@@ -1,4 +1,4 @@
-import {anchorOf,visibleFeedItems,itemDayKey,filterFeedItems,pendingCount,stateOfItem,statusCounts,hasTaskItems,isPendingItem} from './feed-model.js';
+import {anchorOf,visibleFeedItems,itemDayKey,filterFeedItems,pendingCount,stateOfItem,statusCounts,hasTaskItems,isPendingItem,isNoticeItem,isIgnoredItem,ignoredFeedItems} from './feed-model.js';
 import {sdk,esc,icon,iconButton,sheet,segmented,bindSegmented,bannerHtml,openLightbox,toast,friendlyTime} from './shared.js';
 const app=document.getElementById('app');
 let snapshot=sdk.state,data=snapshot.data,month=null,selected='',type='',status='',view=data.host?.feed?.defaultView==='list'?'list':'month',syncing=false,error='';
@@ -14,6 +14,7 @@ const dayOf=x=>itemDayKey(anchor(x),tz());
 const typeSpec=x=>types().find(t=>t.id===x.type);
 const label=x=>x.category||typeSpec(x)?.label||'内容';
 const allItems=()=>visibleFeedItems(data,now(),manifest());
+const ignoredItems=()=>ignoredFeedItems(data,now(),manifest());
 const items=()=>filterFeedItems(allItems(),{type,status},manifest());
 const key=(y,m,d)=>`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
 const parts=k=>k.split('-').map(Number);
@@ -24,8 +25,8 @@ const when=ms=>friendlyTime(ms,tz(),now());
 const fileSize=b=>b>=1048576?`${(b/1048576).toFixed(1)} MB`:`${Math.max(1,Math.round(b/1024))} KB`;
 const stateOf=x=>stateOfItem(x,manifest());
 const overdue=x=>stateOf(x)==='pending'&&x.dueAt&&x.dueAt<now();
-/** 状态标签：公告未读写「未读」而不是重复类型名；已读公告不挂标签，减少噪音 */
-function stateTag(x){const s=stateOf(x);if(overdue(x))return ['pending','已逾期'];return {pending:['pending','待完成'],done:['done','已完成'],notice:['notice','未读'],old:['old','往期'],read:['','']}[s];}
+/** 状态标签：公告未读写「未读」而不是重复类型名；已读公告明确显示已读标签 */
+function stateTag(x){const s=stateOf(x);if(overdue(x))return ['pending','已逾期'];return {pending:['pending','待完成'],done:['done','已完成'],notice:['notice','未读'],old:['old','往期'],read:['read','已读']}[s];}
 /** 类型图标：组件认识自己的类型；不认识的按清单声明的语义兜底 */
 function typeIcon(x){const map={homework:'edit',exam:'clock',announcement:'megaphone',notice:'info'};if(map[x.type])return map[x.type];return typeSpec(x)?.kind==='notice'?'bell':'file';}
 const tile=x=>`<span class="type-tile ${stateOf(x)}">${icon(typeIcon(x))}</span>`;
@@ -77,6 +78,7 @@ function render(){
   (showStatus?(choices.length>1?'<span class="sep"></span>':'')+chip('status','pending',status==='pending','未完成',counts.pending)+chip('status','done',status==='done','已完成',counts.done):'')+
   `</div>`:'';
  app.innerHTML=header(true)+pendingCard()+
+  `<button class="nav-row ignored-entry" id="ignored">${icon('inbox')}<span class="row-copy">已忽略</span><span class="muted">${ignoredItems().length} 项</span>${icon('next')}</button>`+
   segmented('view-seg',[{id:'month',label:'月历',icon:'calendar'},{id:'list',label:'列表',icon:'list'}],view)+
   filters+(data.lastError?bannerHtml(data.lastError,'err'):'')+
   `<div class="pane" id="pane">${view==='month'?monthPane():listPane(available)}</div>`;
@@ -85,6 +87,7 @@ function render(){
  app.querySelectorAll('[data-type]').forEach(b=>b.onclick=()=>{type=b.dataset.type;render();});
  app.querySelectorAll('[data-status]').forEach(b=>b.onclick=()=>{status=status===b.dataset.status?'':b.dataset.status;render();});
  app.querySelectorAll('[data-pending]').forEach(b=>b.onclick=openPending);
+ document.getElementById('ignored').onclick=openIgnored;
  bindMonth();bindItems(app);
  if(keepScroll!=null&&!paneAnim){const l=app.querySelector('.list-scroll');if(l)l.scrollTop=keepScroll;}
  if(paneAnim){const p=document.getElementById('pane');const cls=paneAnim;paneAnim='';if(p){p.classList.add(cls);p.addEventListener('animationend',()=>p.classList.remove(cls),{once:true});}}
@@ -205,6 +208,29 @@ function openPending(){
  sheet(`待完成 · ${list.length} 项`,list.length?`<p class="section-label">按截止时间排序</p><div class="group stagger">${list.map((x,i)=>itemRow(x).replace('<button ',`<button style="--i:${i}" `)).join('')}</div>`:emptyState('没有待完成的作业和考试','check'),root=>bindItems(root));
 }
 function fact(ic,name,value,note='',urgent=false){return `<div class="row">${icon(ic)}<span class="row-copy"><small>${name}</small><span>${esc(value)}</span></span>${note?`<span class="fact-note${urgent?' urgent':''}">${esc(note)}</span>`:''}</div>`;}
+function openIgnored(){
+ const list=ignoredItems();
+ sheet(`已忽略 · ${list.length} 项`, `<p class="muted">这些内容不会出现在待完成小组件或提醒中。点开详情可恢复。</p>`+
+  (list.length?`<div class="group">${list.map(itemRow).join('')}</div>`:emptyState('没有已忽略的内容','inbox')), root=>bindItems(root));
+}
+
+function confirmRead(x){
+ sheet('标记为已读？', `<p>将向雨课堂官方同步已读状态，成功后不再提醒此公告。</p><div class="actions"><button class="secondary" id="read-cancel">取消</button><button class="primary" id="read-confirm">确认已读</button></div><p class="feedback" id="read-feedback" role="status" hidden></p>`, (root)=>{
+  root.querySelector('#read-cancel').onclick=()=>openItem(x);
+  const btn=root.querySelector('#read-confirm');
+  btn.onclick=async()=>{
+   if(btn.disabled)return;btn.disabled=true;btn.textContent='正在同步…';
+   try {
+    const saved=await sdk.request('item.markRead',{itemId:x.id});
+    data=saved;snapshot={...snapshot,data:saved};render();
+    openItem(saved.items.find(item=>item.id===x.id)||x);toast('已读，已同步到雨课堂官方');
+   } catch(e) {
+    const feedback=root.querySelector('#read-feedback');feedback.hidden=false;feedback.textContent=e.message;feedback.className='feedback error';
+    btn.disabled=false;btn.textContent='重试已读同步';
+   }
+  };
+ });
+}
 function openItem(x){
  const s=stateOf(x),[cls,text]=stateTag(x),body=x.content||x.summary||'';
  const facts=[];
@@ -222,6 +248,18 @@ function openItem(x){
   (files.length?`<p class="section-label">附件 · ${files.length}</p><div class="group">${files.map((a,n)=>`<div class="att" data-att="${n}"><div class="att-head"><span class="type-tile">${icon('file')}</span><span class="row-copy"><span class="att-name">${esc(a.name||'附件')}</span><small class="att-meta">${[fileExt(a.name),a.size?fileSize(a.size):''].filter(Boolean).join(' · ')||'附件'}</small></span></div><div class="att-actions"><button class="secondary small" data-preview="${n}">${icon('eye')}预览</button><button class="tonal small" data-download="${n}">${icon('download')}下载</button></div></div>`).join('')}</div>`:'')+
   (!body&&!images.length&&!files.length?`<p class="footnote center">这条内容没有正文</p>`:''),
   root=>{
+   const close=root.querySelector('#sheet-close');
+   const controls=document.createElement('div');controls.className='detail-actions';
+   if(isNoticeItem(x,manifest())&&!x.done){const read=document.createElement('button');read.className='tonal small';read.textContent='已读';read.onclick=()=>confirmRead(x);controls.append(read);}
+   const ignored=isIgnoredItem(x,data,now(),manifest());
+   const ignore=document.createElement('button');ignore.className='secondary small';ignore.textContent=ignored?'恢复':'忽略';
+   ignore.onclick=async()=>{
+    if(ignore.disabled)return;ignore.disabled=true;
+    try {const saved=await sdk.request('item.ignore',{itemId:x.id,ignored:!ignored});data=saved;snapshot={...snapshot,data:saved};render();openItem(saved.items.find(i=>i.id===x.id)||x);toast(ignored?'已恢复':'已忽略，可在已忽略列表恢复');}
+    catch(e){ignore.disabled=false;toast(e.message,'err');}
+   };
+   controls.append(ignore);close.before(controls);
+   if(ignored){const hint=document.createElement('p');hint.className='banner info';hint.textContent='已忽略，不会出现在待完成小组件和提醒中。';root.querySelector('.sheet-body').prepend(hint);}
    bindAttachments(root,files);
    root.querySelectorAll('img.media').forEach((im,idx)=>im.addEventListener('click',()=>openLightbox(images,idx)));
    root.querySelectorAll('img.media').forEach(i=>i.onerror=()=>{const b=document.createElement('button');b.className='secondary wide';b.innerHTML=`${icon('refresh')}图片加载失败，点击重试`;i.replaceWith(b);b.onclick=()=>{b.replaceWith(i);i.src=i.getAttribute('src');};});

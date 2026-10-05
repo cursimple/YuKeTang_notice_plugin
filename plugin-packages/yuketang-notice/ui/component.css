@@ -541,3 +541,5 @@ body.locked .page{height:100%;min-height:0;overflow:hidden;overflow:clip;transit
 }
 
 @media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-delay:0ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+.detail-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}.sheet-grip header h2{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ignored-entry{min-height:44px;margin:0 16px 8px;width:calc(100% - 32px)}

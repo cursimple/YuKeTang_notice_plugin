@@ -148,3 +148,20 @@ test("itemDayKey：跨时区落到正确的那一天", () => {
   assert.equal(itemDayKey(ms, "Asia/Shanghai"), "2026-10-01");
   assert.equal(itemDayKey(ms, "UTC"), "2026-09-30");
 });
+
+test('忽略：默认保留逾期，开启自动忽略后隐藏，可单条恢复且保留手动忽略', async () => {
+  const {visibleFeedItems,ignoredFeedItems}=await import('../plugin-packages/yuketang-notice/ui/feed-model.js');
+  const task={id:'task',type:'homework',title:'作业',dueAt:100};
+  const notice={id:'notice',type:'announcement',title:'公告',publishAt:50};
+  let data={items:[task,notice],host:{}};
+  assert.equal(visibleFeedItems(data,200).length,2);
+  data.host.ignoreOverdue=true;
+  assert.deepEqual(visibleFeedItems(data,200).map(x=>x.id),['notice']);
+  assert.deepEqual(ignoredFeedItems(data,200).map(x=>x.id),['task']);
+  data.restoredItemIds=['task'];
+  assert.equal(visibleFeedItems(data,200).length,2);
+  data.ignoredItemIds=['task'];
+  assert.equal(ignoredFeedItems(data,200).length,1);
+  data.host.ignoreOverdue=false;
+  assert.equal(ignoredFeedItems(data,200).length,1);
+});

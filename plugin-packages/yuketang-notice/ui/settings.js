@@ -99,7 +99,7 @@ function openPanel(key){
   title='通知与同步';
   const due=selectField({id:'p-due',label:'截止前提醒',description:'按内容原始截止时间提前提醒一次',value:h.dueReminderHours,options:[[0,'不提醒'],[1,'提前 1 小时'],[3,'提前 3 小时'],[6,'提前 6 小时'],[12,'提前 12 小时'],[24,'提前 1 天'],[48,'提前 2 天']].map(([v,l])=>({value:v,label:l})),onPick:v=>action('host.update',{...state.data.host,dueReminderHours:Number(v)})});
   const interval=selectField({id:'p-interval',label:'后台同步间隔',description:'手机系统可能推迟后台同步',value:h.syncIntervalMinutes??'',options:[[null,'组件默认（1 小时）'],[30,'30 分钟'],[60,'1 小时'],[120,'2 小时'],[240,'4 小时'],[480,'8 小时']].map(([v,l])=>({value:v??'',label:l})),onPick:v=>action('host.update',{...state.data.host,syncIntervalMinutes:v===''?null:Number(v)})});
-  body=`<div class="group">${row('新内容通知','老师发布作业、考试或公告时提醒',toggle('notifyNew',h.notifyNew,'新内容通知'),'bell')}</div><p class="section-label">提醒时间</p><div class="group">${due.html}</div><p class="section-label">同步</p><div class="group">${interval.html}</div>`;
+  body=`<div class="group">${row('新内容通知','老师发布作业、考试或公告时提醒',toggle('notifyNew',h.notifyNew,'新内容通知'),'bell')}${row('自动忽略逾期任务','默认关闭；开启后从小组件和提醒中收起逾期任务，可在已忽略列表恢复',toggle('ignoreOverdue',h.ignoreOverdue===true,'自动忽略逾期任务'),'inbox')}</div><p class="section-label">提醒时间</p><div class="group">${due.html}</div><p class="section-label">同步</p><div class="group">${interval.html}</div>`;
   binds.push(due,interval);
  }
  else if(key==='content'){title='同步内容';body=`<div class="group">${fields()}</div>`;binds.push(...selectFields());}

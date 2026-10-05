@@ -14,9 +14,20 @@ export function anchorOf(item, source = 'automatic', manifest) {
   return selected ?? automatic ?? item.publishAt ?? item.firstSeenAt ?? 0;
 }
 
+export function isIgnoredItem(item, data, now = Date.now(), manifest) {
+  return (data.ignoredItemIds || []).includes(item.id) || (data.host?.ignoreOverdue === true &&
+    !(data.restoredItemIds || []).includes(item.id) && !item.done && !isNoticeItem(item, manifest) &&
+    item.dueAt != null && item.dueAt <= now);
+}
+
+export function ignoredFeedItems(data, now = Date.now(), manifest) {
+  return (data.items || []).filter(item => isIgnoredItem(item, data, now, manifest));
+}
+
 export function visibleFeedItems(data, now = Date.now(), manifest) {
   const settings = data.host?.feed || {};
   return (data.items || []).filter(item => {
+    if (isIgnoredItem(item, data, now, manifest)) return false;
     if (settings.includedTypes != null && !settings.includedTypes.includes(item.type)) return false;
     const notice = kindOf(item.type, manifest) === 'notice';
     if (item.done && notice && settings.includeReadNotices === false) return false;

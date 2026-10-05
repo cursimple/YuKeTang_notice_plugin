@@ -48,6 +48,31 @@ export async function checkLogin(ctx) {
   }
 }
 
+/** 已读必须经官方接口确认，失败时不返回 done，也不修改本地状态。 */
+export async function performItemAction(ctx) {
+  if (ctx.action?.type !== "markRead") throw new Error("不支持此内容操作");
+  const itemId = String(ctx.action.itemId || "");
+  const announcement = /^announcement:(\d+):(\d+)$/.exec(itemId);
+  const notice = /^notice:(\d+)$/.exec(itemId);
+  if (!announcement && !notice) throw new Error("此内容不支持标记已读");
+  const api = createApi(ctx);
+  await api.courses();
+  await api.account();
+  if (announcement) {
+    const [, cid, id] = announcement;
+    await api.markAnnouncementRead(cid, id);
+    const row = (await api.announcements(cid)).find(x => String(x.id) === id);
+    if (!(row?.is_read === true || row?.is_read === 1 || row?.is_read === "1")) {
+      throw new Error("官方尚未确认公告已读，请稍后同步后重试");
+    }
+  } else {
+    await api.markSystemMessageRead(notice[1]);
+    const row = (await api.systemMessages()).find(x => String(x.id) === notice[1]);
+    if (!row || row.push_status === 2 || row.push_status === "2") throw new Error("官方尚未确认消息已读，请稍后重试");
+  }
+  return { itemId, done: true };
+}
+
 export async function sync(ctx) {
   const api = createApi(ctx);
   const settings = ctx.settings || {};
@@ -243,7 +268,7 @@ async function systemMessagesOf(api) {
       course: "雨课堂",
       category: "系统消息",
       publishAt: toMillis(row.start_time),
-      done: row.push_status !== 2,
+      done: row.push_status !== 2 && row.push_status !== "2",
       author: row.creator_name || "",
       summary: text.slice(0, 160),
       content: text,
@@ -320,7 +345,27 @@ function createApi(ctx) {
     return json;
   }
 
+  async function postJson(path, payload, cid) {
+    const response = await ctx.network.fetch(`${base}${path}`, {
+      method: "POST", credentials: "include",
+      headers: { ...v3Headers(cid), "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (response.status === 401 || response.status === 403) throw new LoginRequiredError("登录失效，请重新登录");
+    if (!response.ok) throw new Error(`已读同步失败：HTTP ${response.status}`);
+    let result;
+    try { result = JSON.parse(await response.text()); } catch { throw new Error("官方未返回已读确认"); }
+    if (result?.success !== true && result?.code !== 0) throw new Error(result?.msg || result?.message || "官方拒绝了已读同步");
+    return result;
+  }
+
   return {
+    // 官网学生端读取 topic 详情来记录阅读；read/info 只是教师查看阅读名单的 GET 接口。
+    async markAnnouncementRead(cid, id) {
+      const result = await getJson(`/v/discussion/v2/topic/${encodeURIComponent(id)}/?classroom_id=${encodeURIComponent(cid)}`, v3Headers(cid));
+      if (result?.success !== true || !result?.data?.data?.topic) throw new Error(result?.msg || "官方未确认公告详情读取成功");
+    },
+    markSystemMessageRead: id => postJson("/api/v3/message/notice/read", { notification_ids: [Number(id)] }),
     homeUrl: () => `${base}/v2/web/index`,
     courseUrl: (cid) => `${base}/v2/web/studentLog/${cid}`,
 

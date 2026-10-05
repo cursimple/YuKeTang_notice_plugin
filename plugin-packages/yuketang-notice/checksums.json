@@ -2,17 +2,17 @@
   "algorithm": "SHA-256",
   "files": {
     "assets/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "main.js": "1f363734d0b3a94b9080cda8a0181b73afc4a15faa84aaf9172978041186a980",
-    "manifest.json": "1064dcd9b4cc22bd617bef35180d7cc815e710c4c3feb9b8d08fb0d0dd18d07a",
+    "main.js": "aa5c9ee2c9e4c753769f3bbd86c04109ad862861a65b7e5dd5d41c3b75801083",
+    "manifest.json": "6cc58dd0a5b5375afcae2a87f68b47c9b62c34dfb28124374a98258c3b5ab15e",
     "ui/auth.js": "887a065b22a70f7c33f7284c70fcce6bd3d01c8485443c4e3909d2dd7d390be0",
-    "ui/component.css": "c35b604b1b99a69491fb86a64a26fa05b292b16bf623d6c8d806bcca30aaf80f",
-    "ui/feed-model.js": "299cd1bd057e1537a66f805a8d7d01a8c628be7b76ddcc8d61c4995dfbf803c4",
+    "ui/component.css": "a0fcd49f99105371c218a4db0c489abe3999d68a2751ac616dd06a4cdf6695fb",
+    "ui/feed-model.js": "117cd8979f494082fc226f1ac30c56ca8de5b0662552c339f904f57cabe4b0b1",
     "ui/feed.html": "a39706cec424d6817e971913a41acd37be17144d73f1aea0769173dc92414c86",
-    "ui/feed.js": "e83d5567b1786428056e87a03e822fcb33ab88134ced61d92bc54b2285155587",
+    "ui/feed.js": "f8236f41d1bab502472b9a12df7339982b7ba29159ccd2225197b71afafa4f21",
     "ui/login.html": "2f5ab0ab874ad42b5643029e92a1e371eaf57a8693f47b06b620cf44c967e405",
     "ui/login.js": "b0c555ff963373e510a3bc9d42bffa25d2a0953279bbbfffc9dc23c09df1202f",
     "ui/settings.html": "23e62eed089246f6789b05aad8b58ce9cda795753990e04aee908b7100363c55",
-    "ui/settings.js": "61139a9b47ed1d7b4150c3b2c5b55dc625f3da6435b0eb0ab6e1ee47ea4a582b",
+    "ui/settings.js": "bd104882948d9ac61930f618177f120562937991d22b7c36fa82cfe11357bb94",
     "ui/shared.js": "46556be58f964a6db78fa512f97345209b92c40661f7ec711519cb02f715e24c"
   }
 }
