@@ -1,7 +1,6 @@
 name: release
 
-# 推 v* 标签就打包发版：tag 必须和 manifest.json 里的 version 对上，
-# Release 里放组件 zip 和 manifest.json（{filename, version}），课简的插件市场按后者找最新版
+# Release tags must match manifest version; publish the bundle and market manifest assets.
 on:
   push:
     tags: ["v*"]

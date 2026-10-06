@@ -1,8 +1,7 @@
-/** 清单里声明的类型语义；组件自己知道，不用按类型名猜 */
 export function kindOf(type, manifest) {
   const spec = (manifest?.extension?.feedTypes || []).find(t => t.id === type);
   if (spec?.kind === 'notice' || spec?.kind === 'task') return spec.kind;
-  // 老清单没声明时的兜底，只影响旧包
+  // Fallback semantics for legacy manifests without declarations.
   return ['announcement', 'notice'].includes(type) ? 'notice' : 'task';
 }
 
@@ -48,19 +47,15 @@ export function itemDayKey(milliseconds, timeZone = 'Asia/Shanghai') {
   }
 }
 
-/** 公告读完即止，不参与「完成 / 未完成」；任务才分完成状态 */
 export const isNoticeItem = (item, manifest) => kindOf(item.type, manifest) === 'notice';
 
-/** 待完成：任务类、有未完成的、且不是往期内容 */
 export const isPendingItem = (item, manifest) =>
   !item.done && !item.historical && !isNoticeItem(item, manifest);
 
-/** 待完成条数：驱动顶部那一条计数入口 */
 export function pendingCount(items, manifest) {
   return (items || []).filter(item => isPendingItem(item, manifest)).length;
 }
 
-/** 一条内容在界面上的状态，决定圆点 / 色条 / 标签的颜色 */
 export function stateOfItem(item, manifest) {
   if (item.historical) return 'old';
   const notice = isNoticeItem(item, manifest);
@@ -70,16 +65,11 @@ export function stateOfItem(item, manifest) {
 
 export const STATE_LABELS = {old: '往期', done: '已完成', read: '已读', notice: '公告', pending: '待完成'};
 
-/** 状态对应的文字标签 */
 export function stateLabelOf(item, manifest) {
   return STATE_LABELS[stateOfItem(item, manifest)];
 }
 
-/**
- * 按类型与完成状态筛选。
- * [status] 为空表示全部；`pending` 只留未完成任务；`done` 只留已完成任务——
- * 已读公告不算「已完成」，否则筛出来的和用户理解的不一样。
- */
+/** Pending/done filters apply to tasks only; read notices do not count as completed tasks. */
 export function filterFeedItems(items, {type = '', status = ''} = {}, manifest) {
   return (items || []).filter(item => {
     if (type && item.type !== type) return false;
@@ -89,7 +79,7 @@ export function filterFeedItems(items, {type = '', status = ''} = {}, manifest) 
   });
 }
 
-/** 完成状态筛选的分母：只数任务类内容，公告不参与 */
+/** Count tasks only in completion statistics. */
 export function statusCounts(items, manifest) {
   const tasks = (items || []).filter(item => !isNoticeItem(item, manifest));
   return {
@@ -99,7 +89,7 @@ export function statusCounts(items, manifest) {
   };
 }
 
-/** 有没有任务类内容；只有公告时不必显示完成状态筛选 */
+/** Hide completion filtering when no task content exists. */
 export const hasTaskItems = (items, manifest) =>
   (items || []).some(item => !isNoticeItem(item, manifest));
 

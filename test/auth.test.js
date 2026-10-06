@@ -12,7 +12,7 @@ test('普通网络请求超时提供可重试信息',async()=>{const c=make((url
 test('切换页面取消旧请求，不伪装成登录失败',async()=>{const c=make((url,{signal})=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError')))));const pending=c.request('/test');await new Promise(r=>setTimeout(r,0));c.cancel();await assert.rejects(pending,{name:'AbortError'});});
 test('二维码有效期按服务端值计算',async()=>{const c=make(async()=>response({code:0,data:{qrContent:'https://mp.weixin.qq.com/example',token:'test',expire_seconds:60}}));const q=await c.createQr();assert.equal(q.expiresAt,61000);});
 test('服务端没给 expire_seconds 时按 60 秒，而不是 180 秒',async()=>{
- // 真实接口不返回 expire_seconds；按 180 秒算会让用户以为还有时间，其实早过期了
+ // Use the conservative QR lifetime when expiry metadata is absent.
  const c=make(async()=>response({code:0,data:{qrContent:'https://changjiang.yuketang.cn/api/v3/user/login/app-web-qr?u=x',token:'jwt'}}));
  const q=await c.createQr();assert.equal(q.expiresAt,61000);
 });
@@ -26,7 +26,7 @@ test('二维码确认后建立网页会话',async()=>{
  assert.deepEqual(JSON.parse(last.init.body),{UserID:123,Auth:'fake'});
 });
 test('token 失效时换一张码继续等，而不是报「HTTP 400」',async()=>{
- // 这是用户看到的「扫了没反应」：旧代码把 400 直接抛成失败
+ // Expired confirmation tokens trigger QR recovery rather than generic HTTP failure.
  let issued=0,confirmed=false;
  const c=make(async(url)=>{
   if(url.includes('app-web-pre-info')){issued++;return response({code:0,data:{qrContent:'https://changjiang.yuketang.cn/api/v3/user/login/app-web-qr?u='+issued,token:'t'+issued}});}
@@ -45,13 +45,12 @@ test('token 失效时换一张码继续等，而不是报「HTTP 400」',async()
 test('连续取不到扫码确认时报可重试的错误，而不是静默挂着',async()=>{
  const c=make(async(url)=>{
   if(url.includes('app-web-pre-info'))return response({code:0,data:{qrContent:'https://changjiang.yuketang.cn/api/v3/user/login/app-web-qr?u=x',token:'t'}});
-  return response({code:0,data:null}); // 没人扫码时的正常返回
+  return response({code:0,data:null});
  });
  await assert.rejects(c.confirmQr({token:'t',expiresAt:999999}),/未收到扫码确认/);
 });
 test('二维码地址越界被拒绝',async()=>{const c=make(async()=>response({code:0,data:{qrContent:'https://example.invalid/qr',token:'fake'}}));await assert.rejects(c.createQr(),/二维码地址无效/);});
 
-// ---- WebSocket 扫码协议（验证过的路径） ----
 
 test('WS 请求体是学堂在线协议的 requestlogin',()=>{
  assert.deepEqual(JSON.parse(RainLoginClient.qrRequest()),{op:'requestlogin',role:'web',version:1.4,type:'qrcode',from:'web'});
@@ -59,7 +58,7 @@ test('WS 请求体是学堂在线协议的 requestlogin',()=>{
 
 test('解析 WS 推来的二维码消息，取 60 秒有效期',()=>{
  const m=RainLoginClient.parseQrMessage(JSON.stringify({op:'requestlogin',ticket:'https://mp.weixin.qq.com/cgi-bin/showqrcode?ticket=x',qrcode:'http://weixin.qq.com/q/02WumxUdCc92',expire_seconds:60}));
- // 必须用 qrcode（扫码文本），不是 ticket（微信二维码图片地址）——后者编码出来是死链
+ // Encode scan text, never the QR image URL.
  assert.deepEqual(m,{type:'qr',content:'http://weixin.qq.com/q/02WumxUdCc92',seconds:60});
 });
 test('WS 只给了 ticket 时不该拿它当扫码文本',()=>{

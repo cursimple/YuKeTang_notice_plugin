@@ -25,12 +25,10 @@ const when=ms=>friendlyTime(ms,tz(),now());
 const fileSize=b=>b>=1048576?`${(b/1048576).toFixed(1)} MB`:`${Math.max(1,Math.round(b/1024))} KB`;
 const stateOf=x=>stateOfItem(x,manifest());
 const overdue=x=>stateOf(x)==='pending'&&x.dueAt&&x.dueAt<now();
-/** 状态标签：公告未读写「未读」而不是重复类型名；已读公告明确显示已读标签 */
+/** Unread and read notices have explicit status labels. */
 function stateTag(x){const s=stateOf(x);if(overdue(x))return ['pending','已逾期'];return {pending:['pending','待完成'],done:['done','已完成'],notice:['notice','未读'],old:['old','往期'],read:['read','已读']}[s];}
-/** 类型图标：组件认识自己的类型；不认识的按清单声明的语义兜底 */
 function typeIcon(x){const map={homework:'edit',exam:'clock',announcement:'megaphone',notice:'info'};if(map[x.type])return map[x.type];return typeSpec(x)?.kind==='notice'?'bell':'file';}
 const tile=x=>`<span class="type-tile ${stateOf(x)}">${icon(typeIcon(x))}</span>`;
-/** 剩余时间：截止前提示「还剩」，过了提示「已逾期」 */
 function remain(ms){const d=ms-now(),a=Math.abs(d),h=a/3600000;const t=h<1?`${Math.max(1,Math.round(a/60000))} 分钟`:h<48?`${Math.round(h)} 小时`:`${Math.round(h/24)} 天`;return d>=0?`还剩 ${t}`:`已过 ${t}`;}
 function ensureDate(){if(!month){const [y,m]=parts(today());month=new Date(y,m-1,1);selected=today();}}
 async function request(command,payload){try{return await sdk.request(command,payload);}catch(e){error=e.message||'操作未完成';render();toast(error,'err');}}
@@ -93,7 +91,6 @@ function render(){
  if(paneAnim){const p=document.getElementById('pane');const cls=paneAnim;paneAnim='';if(p){p.classList.add(cls);p.addEventListener('animationend',()=>p.classList.remove(cls),{once:true});}}
 }
 
-/* ---------- 月历 ---------- */
 function byDay(){const by={};items().forEach(x=>{const k=dayOf(x);(by[k]??=[]).push(x);});Object.values(by).forEach(l=>l.sort((a,b)=>anchor(a)-anchor(b)));return by;}
 function monthPane(){
  const by=byDay(),y=month.getFullYear(),m=month.getMonth(),first=(new Date(y,m,1).getDay()+6)%7,total=new Date(y,m+1,0).getDate();
@@ -115,7 +112,7 @@ function bindMonth(){
  document.getElementById('today')?.addEventListener('click',()=>{clearTimeout(pageTimer);pageTimer=0;pendingDelta=0;const [y,m]=parts(today()),cur=month;month=new Date(y,m-1,1);const delta=(month.getFullYear()-cur.getFullYear())*12+month.getMonth()-cur.getMonth();if(delta){month=cur;flip(delta,today());}else selectDay(today());});
  document.getElementById('selected')?.addEventListener('click',()=>openDay(selected));
 }
-/** 选日期只原地换选中态和下面那一块，不重绘整页，选中底色才有过渡 */
+/** Update selection and date content locally so transitions do not restart the whole page. */
 function selectDay(k){
  if(k===selected)return;selected=k;
  app.querySelectorAll('[data-day]').forEach(b=>{const on=b.dataset.day===k;b.classList.toggle('selected',on);b.setAttribute('aria-pressed',String(on));});
@@ -123,7 +120,6 @@ function selectDay(k){
  const old=document.getElementById('day-inline');
  if(old){old.outerHTML=dayInline(byDay()[k]||[],k,true);const fresh=document.getElementById('day-inline');bindItems(fresh);fresh.querySelector('#selected')?.addEventListener('click',()=>openDay(selected));}
 }
-/** 月翻页：先快速滑出，换数据后从另一侧滑入；连点时先补完上一步 */
 function flip(delta,target){
  if(pageTimer){clearTimeout(pageTimer);pageTimer=0;const d=pendingDelta;pendingDelta=0;stepMonth(d);}
  const pane=app.querySelector('#days-view');
@@ -143,7 +139,6 @@ function stepMonth(delta,target){
  selected=target||(month.getFullYear()===ty&&month.getMonth()===tm-1?today():key(month.getFullYear(),month.getMonth(),1));
  render();
 }
-/** 点日期后在月历下方内联展开当日内容；超过 4 条时尾部给「查看全部」 */
 function dayInline(entries,k,swap){
  const rel=relDay(k);
  const head=`<div class="day-inline-head"><strong>${dateLabel(k)} 周${weekdayOf(k)}${rel?` · ${rel}`:''}</strong><span>${entries.length?`${entries.length} 项`:''}</span></div>`;
@@ -152,7 +147,6 @@ function dayInline(entries,k,swap){
  return `<section class="day-inline${swap?' swap':''}" id="day-inline">${head}${body}</section>`;
 }
 
-/* ---------- 列表 ---------- */
 function listPane(available){
  const by=byDay(),keys=Object.keys(by).sort().reverse();
  const fresh=available.length===0&&!data.lastSyncAt;
@@ -164,7 +158,6 @@ function listPane(available){
  return `<div class="list-scroll${paneAnim?'':' stagger'}">${html}</div>`;
 }
 
-/* ---------- 行 / 待完成 ---------- */
 function itemRow(x){
  const s=stateOf(x),[cls,text]=stateTag(x);
  const due=x.dueAt?`${s==='pending'&&x.dueAt-now()<86400000&&x.dueAt>now()?`<b>${esc(when(x.dueAt))} 截止</b>`:`截止 ${esc(when(x.dueAt))}`}`:(x.startAt?`开始 ${esc(when(x.startAt))}`:'');
@@ -182,11 +175,8 @@ function pendingCard(){
  return `<button class="pending-card" data-pending><span class="tile">${n>99?'99+':n}</span><span class="row-copy"><span>${n} 项待完成</span><small style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub}</small></span><span class="chevron">${icon('next')}</span></button>`;
 }
 
-/* ---------- 附件：预览 / 下载 ---------- */
 const fileExt=n=>{const m=/\.([a-z0-9]{1,6})$/i.exec(n||'');return m?m[1].toUpperCase():'';};
-/** 一个按钮忙的时候显示转圈，结束后恢复原样 */
 async function busyButton(b,run){if(b.disabled)return;const html=b.innerHTML;b.disabled=true;b.innerHTML=`<span class="spinner"></span>${b.textContent.trim()}`;try{await run();}finally{b.disabled=false;if(b.isConnected&&b.querySelector('.spinner'))b.innerHTML=html;}}
-/** 下载完成后，这个按钮就变成「打开」，直接开保存在本地的那份 */
 function markDownloaded(btn,entry){btn.className='tonal small done';btn.innerHTML=`${icon('file')}打开`;btn.dataset.saved=entry.id;btn.setAttribute('aria-label','打开已下载的文件');}
 async function bindAttachments(root,files){
  root.querySelectorAll('[data-preview]').forEach(b=>b.onclick=()=>busyButton(b,async()=>{try{await sdk.request('media.open',{url:files[b.dataset.preview].url});}catch(err){toast(err.message||'预览失败，请重试','err');}}));
@@ -194,11 +184,9 @@ async function bindAttachments(root,files){
   if(b.dataset.saved)return busyButton(b,async()=>{try{await sdk.request('media.openSaved',{id:b.dataset.saved});}catch(err){toast(err.message||'打开失败','err');delete b.dataset.saved;b.className='tonal small';b.innerHTML=`${icon('download')}下载`;}});
   busyButton(b,async()=>{try{const entry=await sdk.request('media.download',{url:files[b.dataset.download].url});toast('已下载');markDownloaded(b,entry);}catch(err){toast(err.message||'下载失败，请重试','err');}});
  });
- // 已经下载过的直接标出来
  try{const saved=await sdk.request('media.downloads');(saved||[]).forEach(entry=>{const n=files.findIndex(f=>f.url===entry.url);const btn=n>=0&&root.querySelector(`[data-download="${n}"]`);if(btn)markDownloaded(btn,entry);});}catch{}
 }
 
-/* ---------- 弹层 ---------- */
 function openDay(k){
  const entries=byDay()[k]||[];
  sheet(`${dateLabel(k)} 周${weekdayOf(k)}`,entries.length?`<div class="group stagger">${entries.map((x,i)=>itemRow(x).replace('<button ',`<button style="--i:${i}" `)).join('')}</div>`:emptyState('这一天没有安排'),root=>bindItems(root));

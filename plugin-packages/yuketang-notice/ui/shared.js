@@ -43,10 +43,10 @@ export function applyTheme(state) {
  for(const [key,value] of Object.entries(map))if(/^#[\da-f]{6,8}$/i.test(t[key]||''))document.documentElement.style.setProperty('--'+value,t[key]);
  if(/^#[\da-f]{6}$/i.test(t.primary||''))document.documentElement.style.setProperty('--accent-line',t.primary+'8c');
  document.documentElement.style.colorScheme=t.dark?'dark':'light';
- // 状态色（待完成红 / 公告橙）不在宿主主题里，按宿主的深浅色切换，不能只看 WebView 的 prefers-color-scheme
+ // State colors follow host dark mode rather than WebView prefers-color-scheme.
  document.documentElement.dataset.theme=t.dark?'dark':'light';
 }
-/** 自绘下拉：WebView 的原生 <select> 弹层在部分机型上不出现或点不动，组件自己画一层。 */
+/** Owned dropdown avoids unsupported native WebView select dialogs. */
 export function selectField({id,label,description,value,options,onPick}) {
   const current = options.find(o => String(o.value) === String(value)) ?? options[0];
   const menuId = `${id}-menu`;
@@ -64,11 +64,9 @@ export function selectField({id,label,description,value,options,onPick}) {
   };
 }
 
-/** 状态横幅：tone ∈ ok/err/info，文本转义后输出 */
 export const bannerHtml = (text, tone='info') =>
   `<div class="banner ${{ok:1,err:1,info:1}[tone]?tone:'info'}">${esc(text)}</div>`;
 
-/** 分段切换：首位挂滑块 thumb，bindSegmented 负责量位 */
 export const segmented = (id, items, value) => `<div class="segs" role="tablist" id="${id}"><span class="seg-thumb" aria-hidden="true"></span>${items.map(i=>
   `<button type="button" data-seg="${esc(i.id)}" role="tab" aria-selected="${i.id===value}" class="${i.id===value?'on':''}">${i.icon?icon(i.icon):''}${esc(i.label)}</button>`).join('')}</div>`;
 
@@ -80,7 +78,7 @@ export function bindSegmented(root, id, onPick) {
   const thumb = segs.querySelector('.seg-thumb');
   if (!thumb) return;
   thumb.style.visibility = 'hidden';
-  const prev = segLast.get(id); // 上一次渲染时拇指的位置（FLIP 起点）
+  const prev = segLast.get(id);
   const cur = () => segs.querySelector('[data-seg][aria-selected="true"],[data-seg].on');
   const place = () => {
     const c = cur();
@@ -98,7 +96,7 @@ export function bindSegmented(root, id, onPick) {
       thumb.style.transform = prev.x;
       thumb.style.visibility = 'visible';
     } else {
-      // 首次渲染：静默定位，避免每次重绘都从左端滑过来
+      // Position initial selection without animation.
       const c = cur();
       if (c) { thumb.style.width = `${c.offsetWidth}px`; thumb.style.transform = `translateX(${c.offsetLeft}px)`; thumb.style.visibility = 'visible'; }
     }
@@ -109,15 +107,11 @@ export function bindSegmented(root, id, onPick) {
   });
 }
 
-/** 把 bind 收集器合并执行，页面重绘后一次绑完 */
 export function bindAll(root, parts) { parts.forEach(p => p?.bind?.(root)); }
 
 export function message(text, error=false) {const el=document.getElementById('feedback');if(el){el.textContent=text;el.hidden=!text;el.className=error?'feedback error':'feedback';}}
 let activeClose;
-/**
- * 底部弹层。已有弹层打开时原地换内容（不重放入场动画、保留滚动位置），
- * 设置面板里每改一项都会重绘，之前每次都整层关掉再弹起来，一闪一闪的。
- */
+/** Replace open-sheet content without restarting entrance animation or losing scroll state. */
 export function sheet(title, body, bind) {
  let overlay=document.getElementById('sheet');
  const reuse=overlay&&!overlay.classList.contains('closing');
@@ -142,7 +136,6 @@ export function sheet(title, body, bind) {
  if(!reuse)document.body.append(overlay);
  overlay.querySelector('#sheet-close').onclick=close;overlay.onclick=e=>{if(e.target===overlay)close();};
  document.removeEventListener('keydown',overlay._key||(()=>{}));overlay._key=key;document.addEventListener('keydown',key);
- // 顶部把手区可以下拉关闭：跟手位移，过 1/4 高度或快速下甩就收起
  const grip=overlay.querySelector('.sheet-grip');let startY=0,lastY=0,lastT=0,velocity=0,dragging=false;
  grip.addEventListener('pointerdown',e=>{if(e.target.closest('button'))return;dragging=true;startY=lastY=e.clientY;lastT=e.timeStamp;velocity=0;panel.style.transition='none';try{grip.setPointerCapture(e.pointerId);}catch{}});
  grip.addEventListener('pointermove',e=>{if(!dragging)return;const dy=Math.max(0,e.clientY-startY);velocity=(e.clientY-lastY)/Math.max(1,e.timeStamp-lastT);lastY=e.clientY;lastT=e.timeStamp;panel.style.transform=`translateY(${dy}px)`;});
@@ -153,13 +146,11 @@ export function sheet(title, body, bind) {
  bind?.(overlay,close);
 }
 
-/** 单选弹层：从底部弹出选项列表，选中即关；比页面里展开下拉更稳，也不会把页面撑高 */
 export function pickerSheet(title,options,value,onPick,note=''){
  sheet(title,`${note?`<p class="muted" style="margin:0 4px">${esc(note)}</p>`:''}<div class="group flush" role="radiogroup">${options.map(o=>{const on=String(o.value)===String(value);return `<button class="nav-row option-row${on?' on':''}" role="radio" aria-checked="${on}" data-pick="${esc(o.value)}"><span class="row-copy"><span>${esc(o.label)}</span>${o.description?`<small>${esc(o.description)}</small>`:''}</span><span class="radio"></span></button>`;}).join('')}</div>`,
   (root,close)=>root.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>{root.querySelectorAll('[data-pick]').forEach(x=>{const on=x===b;x.classList.toggle('on',on);x.setAttribute('aria-checked',String(on));});setTimeout(()=>{close();onPick(b.dataset.pick);},140);}));
 }
 
-/** 轻提示：底部浮一条，不挤动页面布局；tone ∈ ok/err/info */
 let toastTimer=0;
 export function toast(text,tone='ok'){
  let el=document.getElementById('toast');
@@ -170,7 +161,6 @@ export function toast(text,tone='ok'){
  clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),tone==='err'?4200:1800);
 }
 
-/** 「今天 09:00」「昨天 21:30」「10月1日 08:00」这种口语化时间 */
 export function friendlyTime(ms,timeZone='Asia/Shanghai',now=Date.now()){
  if(!ms)return '';
  const fmt=(v,o)=>new Intl.DateTimeFormat('zh-CN',{timeZone,...o}).format(new Date(v));
@@ -185,7 +175,6 @@ export function friendlyTime(ms,timeZone='Asia/Shanghai',now=Date.now()){
 
 applyTheme(sdk?.state);sdk?.subscribe(applyTheme);
 
-/** 图片放大查看：双指缩放、双击放大、放大多指拖拽平移、点空白或关闭按钮退出 */
 export function openLightbox(images, index = 0) {
   document.getElementById('lightbox')?.remove();
   if (!images || !images.length) return;
@@ -204,7 +193,6 @@ export function openLightbox(images, index = 0) {
   const count = document.createElement('div'); count.className = 'lb-count';
   const closeBtn = document.createElement('button');
   closeBtn.className = 'icon-btn lb-close'; closeBtn.setAttribute('aria-label', '关闭'); closeBtn.innerHTML = icon('close');
-  // 底部工具条：缩小 / 比例 / 放大 / 保存到相册
   const bar = document.createElement('div'); bar.className = 'lb-bar';
   bar.innerHTML = `<button class="lb-tool" data-lb="out" aria-label="缩小">${icon('zoomOut')}</button><span class="lb-zoom">100%</span><button class="lb-tool" data-lb="in" aria-label="放大">${icon('zoomIn')}</button><span class="lb-sep"></span><button class="lb-tool lb-save" data-lb="save" aria-label="保存到相册">${icon('download')}<span>保存</span></button>`;
   const zoomLabel = bar.querySelector('.lb-zoom');
@@ -244,7 +232,7 @@ export function openLightbox(images, index = 0) {
   img.onerror = () => { hint.textContent = '图片加载失败'; hint.classList.remove('off'); };
 
   img.addEventListener('pointerdown', (e) => {
-    try { img.setPointerCapture(e.pointerId); } catch { /* 合成事件等情况没有活动指针，跳过捕获即可 */ }
+    try { img.setPointerCapture(e.pointerId); } catch {   }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
@@ -274,13 +262,11 @@ export function openLightbox(images, index = 0) {
     pointers.delete(e.pointerId);
     if (pointers.size < 2) pinchDist = 0;
     if (pointers.size === 0) {
-      // 原始大小时左右滑动切换图片
       const swipe = panStart && scale === 1 && images.length > 1 ? e.clientX - panStart.x : 0;
       if (Math.abs(swipe) > 60 && Math.abs(swipe) > Math.abs(e.clientY - panStart.y)) {
         i = (i + (swipe < 0 ? 1 : -1) + images.length) % images.length; panStart = null; setImage(); return;
       }
       clampView(); apply(true); panStart = null;
-      // 双击切换缩放
       const now = Date.now();
       if (scale > 1 && now - lastTap < 300 && Math.hypot(e.clientX - tapX, e.clientY - tapY) < 24) {
         scale = 1; tx = 0; ty = 0; apply(true); lastTap = 0; return;

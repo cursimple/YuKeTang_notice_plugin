@@ -11,7 +11,6 @@ $('copy-error').innerHTML=icon('copy');
 $('error').insertAdjacentHTML('afterbegin',icon('alert'));
 $('hero-orb').innerHTML=icon('book');
 $('privacy-icon').outerHTML=icon('shield');
-/** 登录方式页签的滑块：首次静默定位，之后跟着切换滑过去 */
 function placeThumb(animate){
  const tabs=document.querySelector('.tabs'),thumb=tabs?.querySelector('.seg-thumb'),cur=tabs?.querySelector('[aria-selected="true"]');
  if(!thumb||!cur)return;
@@ -21,7 +20,6 @@ function placeThumb(animate){
 }
 requestAnimationFrame(()=>placeThumb(false));
 window.addEventListener('resize',()=>placeThumb(false));
-// 站点：一行显示当前站点，点开从底部弹出选择；不在页面里展开，页面高度不变
 const siteLabel=()=>siteSpec.options.find(x=>x.value===site)?.label||site;
 function renderSitePicker(){
  $('site-picker').innerHTML=`<button class="nav-row" id="site" type="button">${icon('globe')}<span class="row-copy"><small>学校站点</small><span>${esc(siteLabel())}</span></span><span class="value">切换</span><span class="chevron">${icon('next')}</span></button>`;
@@ -38,7 +36,7 @@ async function switchSite(value){
 }
 renderSitePicker();
 function status(text,loading=false){const el=$('status');el.hidden=!text;el.innerHTML=(loading?'<span class="spinner"></span>':icon('info'))+`<span>${esc(text)}</span>`;}
-// 登录失败必须说清是哪一步、下一步做什么，并提供重试入口；之前只弹一句、也不给重试，用户看不到结果
+// Report the failed login stage with recovery guidance and a retry action.
 function failure(error,next='请在下方重试'){const raw=error?.message||String(error||'');let hint='';
  if(/超时|timeout/i.test(raw))hint='可能是网络较慢或校园网限制，检查网络后重试';
  else if(/网络|fetch|Failed/i.test(raw))hint='检查网络连接，或换一个雨课堂站点';
@@ -122,7 +120,6 @@ function tick(){
   if(!seconds)expired();
  }else if(timer)timer.hidden=true;
 }
-/** 把二维码画出来，并记下到期时间 */
 async function showQr(content,expiresAt,stamp){
  if(stamp!==generation||mode!=='qr')return false;
  const image=await sdk.request('qr.encode',{text:content});
@@ -132,10 +129,7 @@ async function showQr(content,expiresAt,stamp){
  if($('refresh'))$('refresh').disabled=false;tick();status('等待微信扫码确认');
  return true;
 }
-/**
- * 扫码登录优先走 /wsapp/ 的学堂在线协议：二维码和「已扫码确认」是同一个连接推过来的，
- * 不用轮询、也不会有 token 过期导致的「扫了没反应」。连不上才退回 HTTPS 轮询。
- */
+/** Prefer one WebSocket for QR and confirmation; use HTTPS polling only if connection fails. */
 function qrOverSocket(stamp){
  return new Promise((resolve,reject)=>{
   const ws=new WebSocket(client.qrSocketUrl());
@@ -172,12 +166,11 @@ async function refreshQr(){
    return;
   }catch(e){
    if(e.name==='AbortError')return;
-   // WS 只在「连不上」时退回轮询；已经拿到码之后的失败要如实报出来
+   // Polling fallback applies only before a code arrives; later failures remain visible.
    if(!/^__ws_/.test(e.message||''))throw e;
   }
   const challenge=await client.createQr();if(stamp!==generation||mode!=='qr')return;
   await showQr(challenge.content,challenge.expiresAt,stamp);
-  // 过期的码会自动换一张，界面上要跟着换
   await client.confirmQr(challenge,{onRotate:next=>{showQr(next.content,next.expiresAt,stamp);}});
   if(stamp!==generation||mode!=='qr')return;
   qrExpiry=0;submitted=true;await task(()=>completed(stamp));
@@ -192,15 +185,15 @@ function changeMode(next){if(busy||verified||mode===next)return;generation++;cli
  if(next==='qr')refreshQr();else status('');}
 $('phone-tab').onclick=()=>changeMode('phone');$('qr-tab').onclick=()=>changeMode('qr');$('refresh').onclick=refreshQr;
 /**
- * 登录页整页锁定不可拖动：点输入框时按键盘实际占掉的高度把整页往上抬，
- * 让输入框和「登录并连接」都露出来；收起键盘再落回去。
+ * Adjust the fixed login page to the actual keyboard height, keeping fields and submission
+ * visible.
  */
 const page=$('app');
 let liftTimer=0;
 function lift(){
  const el=document.activeElement;
  if(!el||el.tagName!=='INPUT'||verified){page.style.transform='';return;}
- // 过渡动画进行中时 getBoundingClientRect 带着动画里的位移，按此刻实际的平移量换算回原始位置
+ // Subtract the current animated translation when recovering base element bounds.
  const m=getComputedStyle(page).transform,current=m&&m!=='none'?-new DOMMatrix(m).m42:0;
  const vv=window.visualViewport,visible=vv?vv.height+vv.offsetTop:window.innerHeight;
  const target=!$('phone-panel').hidden&&$('verify')?$('verify'):el;
@@ -211,6 +204,6 @@ function lift(){
 const relift=()=>{clearTimeout(liftTimer);liftTimer=setTimeout(lift,60);};
 document.addEventListener('focusin',relift);document.addEventListener('focusout',()=>setTimeout(lift,120));
 window.visualViewport?.addEventListener('resize',relift);window.addEventListener('resize',relift);
-// 只有弹层里的列表能滚，页面本身不跟手指走
+// Only sheet content scrolls; the login page remains fixed.
 document.addEventListener('touchmove',e=>{if(!e.target.closest?.('.sheet-body,.lightbox'))e.preventDefault();},{passive:false});
 const timer=setInterval(tick,250);window.addEventListener('pagehide',()=>{generation++;client.cancel();clearInterval(timer);});

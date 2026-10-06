@@ -1,5 +1,4 @@
-// 日历 / 筛选逻辑的单测：这些规则决定用户看到哪些内容和什么颜色，
-// 之前只写在页面里，改一次就得靠手点，容易回归。
+// Pure calendar and filtering tests cover visible content and state colors.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -21,12 +20,10 @@ const item = (over = {}) => ({
   id: "x", type: "homework", title: "作业", done: false, historical: false, ...over,
 });
 
-// ---- 语义判定 ----
 
 test("kindOf：认清单声明的语义，不靠类型名猜", () => {
   assert.equal(kindOf("homework", MANIFEST), "task");
   assert.equal(kindOf("announcement", MANIFEST), "notice");
-  // 清单里没有的、也没声明语义，才退回老名字兜底
   assert.equal(kindOf("notice", MANIFEST), "notice");
   assert.equal(kindOf("whatever", MANIFEST), "task");
 });
@@ -36,7 +33,6 @@ test("kindOf：清单声明优先于类型名", () => {
   assert.equal(kindOf("announcement", manifest), "task", "声明成任务就该是任务");
 });
 
-// ---- 待完成 ----
 
 test("pendingCount：只数没做完的任务，公告和往期都不算", () => {
   const items = [
@@ -54,7 +50,6 @@ test("pendingCount：已读公告不算待完成", () => {
   assert.equal(pendingCount(items, MANIFEST), 0);
 });
 
-// ---- 状态与颜色 ----
 
 test("stateOfItem：四种状态各自对应一个颜色", () => {
   assert.equal(stateOfItem(item({ id: "1" }), MANIFEST), "pending");
@@ -75,7 +70,6 @@ test("stateLabelOf：状态有对应中文标签", () => {
   assert.equal(stateLabelOf(item({ id: "4", type: "announcement", done: true }), MANIFEST), "已读");
 });
 
-// ---- 筛选 ----
 
 test("filterFeedItems：按类型筛选", () => {
   const items = [item({ id: "a" }), item({ id: "b", type: "exam" }), item({ id: "c", type: "announcement" })];
@@ -118,7 +112,6 @@ test("hasTaskItems：只有公告时不显示完成状态筛选", () => {
   assert.equal(hasTaskItems([item({ id: "h" }), item({ id: "n", type: "announcement" })], MANIFEST), true);
 });
 
-// ---- 日期落点 ----
 
 test("anchorOf：任务按截止，考试按开考，公告按发布", () => {
   const publish = Date.parse("2026-10-01T08:00:00+08:00");
@@ -143,7 +136,6 @@ test("visibleFeedItems：隐藏已完成 / 已读公告分别生效", () => {
 });
 
 test("itemDayKey：跨时区落到正确的那一天", () => {
-  // 北京时间 10 月 1 日 00:30，在 UTC 还是 9 月 30 日
   const ms = Date.parse("2026-10-01T00:30:00+08:00");
   assert.equal(itemDayKey(ms, "Asia/Shanghai"), "2026-10-01");
   assert.equal(itemDayKey(ms, "UTC"), "2026-09-30");

@@ -1,5 +1,7 @@
 # 雨课堂通知 · 课简扩展组件
 
+[English](README_en.md)
+
 登录自己的雨课堂账号后，老师发布的**作业、章节测试、考试和课程公告**由 [课简](https://github.com/cursimple/cursimple-app) 来提醒：
 
 - **新内容通知**：老师新发了作业、考试或公告，推一条通知
@@ -17,7 +19,9 @@
 
 ## 安装
 
-需要支持扩展组件（插件接口版本 5）的课简；更老的版本会提示「接口版本太新」而拒绝安装。
+当前版本：**1.3.1**。
+
+需要支持扩展组件（插件接口版本 9）的课简；更老的版本会提示「接口版本太新」而拒绝安装。
 
 1. 在 [Releases](https://github.com/cursimple/YuKeTang_notice_plugin/releases) 下载 `yuketang-notice-vX.Y.Z.zip`
 2. 课简 → 侧边栏「插件」→「组件」标签页 →「导入 ZIP」，选中这个包
@@ -77,16 +81,20 @@ bash scripts/pack.sh     # 重算 checksums.json，打包到 dist/
 
 发版：改 `plugin-packages/yuketang-notice/manifest.json` 的 `version` / `versionCode`，推 `v<version>` 标签，GitHub Actions 会校验版本号、跑单测、打包并发布 Release（zip + `manifest.json`）。
 
-扩展组件的 manifest 格式与 `ctx` 接口见课简仓库的 [docs/plugin-system.md](https://github.com/cursimple/cursimple-app/blob/main/docs/plugin-system.md#扩展组件kind--extension)。
+扩展组件的 manifest 格式与 `ctx` 接口见课简仓库的 [docs/plugin-system.md](https://github.com/cursimple/cursimple-app/blob/main/docs/plugin-system.md#extension-components)。
 
 ## 许可
 
 MIT
 
-## v1.3.0 内容操作
+## 内容操作
 
 公告详情右上角提供「已读」，确认后读取官网公告详情并回查公告列表的 `is_read`。官网 `/v/discussion/v2/notice/read/info/` 是教师查看阅读名单的 GET 接口，不用它写入已读。系统消息使用 `/api/v3/message/notice/read`，同样回查状态。失败保持未读并显示错误，不用本地已读集合冒充官方同步。
 
 > 已读流程的成功、失败分支有单元测试覆盖，但**尚未用真实账号验证官网服务端的实际结果**；首次使用请到官网确认公告确实显示为已读。
 
 内容详情可忽略或恢复，页面的「已忽略」入口不受正常页面日期范围限制。设置 → 通知与同步增加默认关闭的「自动忽略逾期任务」；忽略内容不参与待完成小组件或提醒，自动忽略开启时单条恢复仍有效。这些选择由通用宿主协议保存，雨课堂接口、ID 解析、业务页面均保留在此独立组件包。
+
+## 桌面小组件
+
+组件通过 `extension.widgets` 声明「雨课堂待办」。布局、文案、待办筛选和跳转均由组件包中的 `ui/widget.html`、`widget.css`、`widget.js` 与 `widget-model.js` 管理，软件通过 API 9 提供数据、渲染和桌面绑定接口。安装并启用本组件后才会出现对应小组件；卸载或停用后入口消失。支持简体中文、繁体中文和英文，自动适应桌面尺寸与字体大小；忽略的任务不显示，单条恢复后重新显示。

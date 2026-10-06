@@ -2,14 +2,15 @@ import {sdk,esc,icon,iconButton,sheet,selectField,bindAll,toast,friendlyTime,pic
 const app=document.getElementById('app'),clone=v=>JSON.parse(JSON.stringify(v));
 let state=sdk.state,busy='',panel='',first=true,refreshTimer=0,downloads=null;
 const fileSize=b=>b>=1048576?`${(b/1048576).toFixed(1)} MB`:`${Math.max(1,Math.round(b/1024))} KB`;
-/** 已下载附件列表：设置页上显示数量，面板里管理 */
 async function loadDownloads(){try{downloads=await sdk.request('media.downloads')||[];}catch{downloads=[];}render();if(panel==='downloads'&&document.getElementById('sheet'))openPanel('downloads');}
-/** 改设置后稍等开关动画走完再原地刷新，否则节点被替换，滑块会直接跳到终点 */
+/** Wait for switch animation before replacing its node. */
 function refresh(delay=280){clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>{render();if(panel&&document.getElementById('sheet'))openPanel(panel);},delay);}
 const dateLabels=[['automatic','自动选择'],['publish','发布日期'],['start','开始日期'],['due','截止日期']];
 const typeIcons={homework:'edit',exam:'clock',announcement:'megaphone',notice:'info'};
 const toggle=(key,value,label)=>`<input aria-label="${esc(label||key)}" type="checkbox" role="switch" data-host="${key}" ${value?'checked':''}>`;
-/** 开关行整行可点（label 包住开关）；带输入框的行用 div，避免点文字就弹键盘 */
+/**
+ * Labels make switch rows clickable; text inputs use div to avoid accidental keyboard focus.
+ */
 const row=(title,description,field,ic='',tag='label')=>`<${tag} class="row${tag==='label'?' pressable':''}">${ic?icon(ic):''}<span class="row-copy"><span>${title}</span>${description?`<small>${description}</small>`:''}</span>${field}</${tag}>`;
 const inputRow=(title,description,field,ic='')=>row(title,description,field,ic,'div');
 const types=()=>state.manifest.extension.feedTypes||[];
@@ -19,7 +20,7 @@ const tz=()=>state.context?.timeZone||'Asia/Shanghai';
 const siteSpec=()=>state.manifest.extension.settings.find(x=>x.key==='site');
 function siteName(){const s=siteSpec();return s.options.find(x=>x.value===(state.data.settings.site||s.default))?.label||'';}
 
-/** 发命令：只在同步时整体忙，改设置不锁界面、不整页重绘成「正在处理」，结果回来原地刷新 */
+/** Only synchronization blocks the page; settings update locally without a full busy redraw. */
 async function action(command,payload={},{quiet=true}={}){
  if(busy==='sync'&&command==='sync')return;
  if(command==='sync'){busy='sync';render();}
@@ -33,7 +34,6 @@ async function action(command,payload={},{quiet=true}={}){
 }
 function setPath(object,path,value){const parts=path.split('.');let target=object;parts.slice(0,-1).forEach(k=>{target[k]||={};target=target[k];});target[parts[parts.length-1]]=value;}
 
-/** 组件清单里声明的选项，按类型画 */
 function fields(){
  return state.manifest.extension.settings.filter(x=>x.key!=='site').map(s=>{
   const value=state.data.settings[s.key]??s.default;
@@ -85,7 +85,6 @@ function render(){
  document.getElementById('relogin').onclick=()=>action('ui.login');
  document.getElementById('site-row').onclick=()=>{const sp=siteSpec();pickerSheet('雨课堂站点',sp.options.map(x=>({value:x.value,label:x.label})),d.settings.site||sp.default,v=>{if(v!==(d.settings.site||sp.default))action('settings.update',{site:v},{quiet:false});},'选择学校使用的雨课堂；切换后需要重新登录');};
  document.getElementById('logout')?.addEventListener('click',()=>confirmSheet('退出登录？','会清除这个账号已同步的内容和关联的课表事务；组件设置和已下载的附件都会保留。','退出登录',()=>action('logout')));
- // 宿主会弹系统确认框，这里不再多问一次
  document.getElementById('remove').onclick=()=>action('component.remove');
  document.getElementById('feed').onclick=()=>action(signed?'ui.feed':'ui.login');
  document.getElementById('sync')?.addEventListener('click',()=>action('sync'));
@@ -148,7 +147,6 @@ function openPanel(key){
   root.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{const row=b.closest('.dl-row');row?.classList.add('leaving');try{await sdk.request('media.delete',{id:b.dataset.del});toast('已删除');}catch(e){toast(e.message||'删除失败','err');}setTimeout(loadDownloads,180);});
  });
 }
-/** 危险操作二次确认 */
 function confirmSheet(title,text,confirmLabel,run){
  panel='';
  sheet(title,`<p class="muted" style="font-size:14px;line-height:1.7;margin:0 4px">${esc(text)}</p><div class="confirm-actions"><button class="secondary" id="confirm-cancel">取消</button><button class="primary danger" id="confirm-ok">${esc(confirmLabel)}</button></div>`,(r,c)=>{

@@ -20,7 +20,7 @@ if(command==='media.saveImage')return true;
 return true;}};
 window.__dl=new URLSearchParams(location.search).get('dl')==='1'?[{id:'dl-0',name:'课程安排.pdf',url:'https://example.invalid/课程安排.pdf',mime:'application/pdf',size:183400,savedAt:Date.parse('2026-10-03T10:30:00+08:00')}]:[];
 window.TencentCaptcha=class{constructor(id,cb){this.cb=cb;}show(){this.cb({ret:0,ticket:'fixture',randstr:'fixture'});}};
-// 夹具的 WebSocket：按真实协议推一张码；result=ws-success 时再推登录成功
+// Simulate QR events; ws-success also emits authenticated state.
 const WS_OK=new URLSearchParams(location.search).get('result')!=='ws-fail';
 window.WebSocket=class{constructor(url){this.url=url;this.readyState=0;setTimeout(()=>{if(!WS_OK){this.onerror?.(new Event('error'));return;}this.readyState=1;this.onopen?.();setTimeout(()=>{this.onmessage?.({data:JSON.stringify({op:'requestlogin',loginid:'fixture',expire_seconds:60,ticket:'https://mp.weixin.qq.com/cgi-bin/showqrcode?ticket=fixture',qrcode:'http://weixin.qq.com/q/fixture'})});if(new URLSearchParams(location.search).get('result')==='ws-success'){setTimeout(()=>this.onmessage?.({data:JSON.stringify({op:'loginsuccess',UserID:1,Auth:'fixture-auth'})}),600);}},120);},80);}send(){}close(){this.readyState=3;this.onclose?.({code:1000});}};
 window.fetch=async(url,init={})=>{const p=new URL(url,location.href).pathname;let value={success:true,status_code:200};if(p.endsWith('verify_pwd_login/')){const code=JSON.parse(init.body).pwd;if(code==='000000')value={success:false,msg:'验证码不正确或已过期'};}

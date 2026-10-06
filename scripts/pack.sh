@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# 打包组件：重算 checksums.json → 打 zip → 写 Release 用的 manifest.json（{filename, version}）
-# 用法：scripts/pack.sh            产物在 dist/
+# Rebuild checksums and release assets into dist/; usage: scripts/pack.sh.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,7 +9,7 @@ out="$root/dist"
 version="$(node -p "require('$src/manifest.json').version")"
 zip_name="yuketang-notice-v${version}.zip"
 
-# checksums.json 必须恰好覆盖包里除它自己和 signature.json 以外的全部文件，宿主会逐个核对
+# Checksums must cover every file except checksums.json and optional signature.json.
 node - "$src" <<'NODE'
 const fs = require("fs");
 const path = require("path");

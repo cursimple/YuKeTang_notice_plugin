@@ -3,9 +3,9 @@
   "kind": "extension",
   "name": "雨课堂通知",
   "publisher": "cursimple",
-  "version": "1.3.0",
-  "versionCode": 130,
-  "apiVersion": 5,
+  "version": "1.3.1",
+  "versionCode": 141,
+  "apiVersion": 9,
   "entry": "main.js",
   "description": "登录雨课堂后，老师发布的作业、考试和课程公告由课简来提醒：新内容通知、截止前提醒、侧边栏日历，还能自动写进课表事务。",
   "homepage": "https://github.com/cursimple/YuKeTang_notice_plugin",
@@ -137,7 +137,17 @@
       "type": "html",
       "settingsEntry": "ui/settings.html",
       "loginEntry": "ui/login.html"
-    }
+    },
+    "widgets": [
+      {
+        "id": "pending",
+        "title": "雨课堂待办",
+        "description": "雨课堂组件提供的作业与考试待办",
+        "entry": "ui/widget.html",
+        "columns": 4,
+        "rows": 2
+      }
+    ]
   },
   "limits": {
     "timeoutMs": 90000,

@@ -1,9 +1,8 @@
-// 组件脚本的单测：假的 ctx + 按接口路径回假数据，字段照雨课堂真实返回的结构写。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkLogin, sync, __test__ } from "../plugin-packages/yuketang-notice/main.js";
 
-const NOW = Date.UTC(2026, 8, 29, 4, 0, 0); // 2026-09-29 12:00 北京时间
+const NOW = Date.UTC(2026, 8, 29, 4, 0, 0);
 
 function makeCtx(routes, { settings = {}, state = {} } = {}) {
   const calls = [];
@@ -42,7 +41,7 @@ const COURSES = {
     ],
   },
 };
-const BASIC = { code: 0, data: { id: 52376675, name: "小明", school: "长江大学", schoolNumber: "2024001", avatar: "" } };
+const BASIC = { code: 0, data: { id: 10001, name: "小明", school: "示例大学", schoolNumber: "2024001", avatar: "" } };
 
 function fullRoutes(overrides = {}) {
   return {
@@ -104,7 +103,7 @@ test("checkLogin：登录了就带回账号，并用课程里的学校 id 填 v3
   const result = await checkLogin(ctx);
   assert.equal(result.loggedIn, true);
   assert.equal(result.account.name, "小明");
-  assert.equal(result.account.school, "长江大学");
+  assert.equal(result.account.school, "示例大学");
   const basic = ctx.calls.find((c) => c.url.includes("/api/v3/user/basic-info"));
   assert.equal(basic.headers["university-id"], "2797");
   assert.equal(basic.headers.xtbz, "ykt");
@@ -125,10 +124,8 @@ test("sync：当前学期优先，同时保留往期公告，不拉往期作业�
   assert.equal(hw.done, false);
   assert.match(hw.summary, /作业 · 绪论 · 已答 3\/10/);
 
-  // 做完的不再查截止时间
   assert.equal(byId["homework:101:2"].done, true);
   assert.ok(!ctx.calls.some((c) => c.url.includes("leaf_info/101/2/")));
-  // 未发布的、视频都不算
   assert.equal(byId["homework:101:3"], undefined);
   assert.equal(byId["homework:101:4"], undefined);
 
@@ -146,7 +143,7 @@ test("sync：当前学期优先，同时保留往期公告，不拉往期作业�
   assert.equal(old.historical, true);
   assert.equal(old.content, "上一学期资料");
   assert.ok(!ctx.calls.some((c) => c.url.includes("sku_list") && c.url.includes("99")));
-  assert.equal(result.account.id, "52376675");
+  assert.equal(result.account.id, "10001");
 });
 
 test("sync：截止时间缓存住，第二次同步不再查 leaf_info", async () => {

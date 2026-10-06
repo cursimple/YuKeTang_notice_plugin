@@ -1,9 +1,8 @@
-// 登录协议随组件包更新；宿主仅提供通用 Cookie 读取和会话校验。
+// Authentication protocol belongs to the component; the host provides cookies and session verification.
 export const SITES = ['changjiang.yuketang.cn', 'www.yuketang.cn', 'huanghe.yuketang.cn', 'pro.yuketang.cn'];
 export const CAPTCHA_APP_ID = '2091064951';
-/** 扫码登录服务：/wsapp/ 上跑的是学堂在线协议，二维码 60 秒一换 */
 export const QR_WS_PATH = '/wsapp/';
-/** 服务端没给有效期时的保守值；实测 WS 返回 60 秒 */
+/** Conservative QR lifetime when the server omits expiry. */
 export const QR_DEFAULT_SECONDS = 60;
 
 export function requireSuccess(result, web, fallback) {
@@ -41,8 +40,7 @@ export class RainLoginClient {
         ...(body ? {body: JSON.stringify(body)} : {}),
       });
       if (!response.ok) {
-        // 雨课堂的错误也是 JSON（如 400 + {"code":50400,"msg":"BAD_REQUEST"}）：
-        // 直接说「HTTP 400」对用户没有任何意义，能读到 msg 就带上。
+        // Preserve structured platform errors alongside HTTP status.
         const detail = await response.text().catch(() => '');
         let message = '';
         try {
@@ -85,7 +83,7 @@ export class RainLoginClient {
     if (!/^\d{4,8}$/.test(code)) throw new Error('请输入正确的短信验证码');
     const result = await this.request('/pc/login/verify_pwd_login/', {type: 'PC', name: this.mobileForCode, pwd: code});
     requireSuccess(result, true, '短信登录失败，请检查验证码');
-    // 账号有效性统一交给组件入口 checkLogin 校验，不在这里重复打开账号接口。
+    // Delegate account validity to the entry's checkLogin function.
     return result;
   }
   async createQr() {
@@ -96,15 +94,13 @@ export class RainLoginClient {
     if (!data.qrContent || !data.token) throw new Error('雨课堂没有返回有效二维码');
     const url = new URL(data.qrContent);
     if (url.protocol !== 'https:' || ![this.site, 'mp.weixin.qq.com'].includes(url.hostname)) throw new Error('二维码地址无效');
-    // 接口没给 expire_seconds 时按 60 秒算：token 的 JWT exp 就是签发后 300 秒，
-    // 但二维码本身远短于它，按 180 秒算会让用户以为还有时间、其实早过期了。
+    // QR expiry is shorter than token JWT lifetime; use 60 seconds without server metadata.
     const seconds = Math.max(30, Math.min(300, Number(data.expire_seconds) || QR_DEFAULT_SECONDS));
     return {content: data.qrContent, token: data.token, expiresAt: this.now() + seconds * 1000};
   }
   /**
-   * 等微信扫码确认。服务端在没人扫码时会一直挂着长轮询，token 过期后立刻回 400，
-   * 所以这里遇到过期/失效就换一张码继续等，而不是直接报错——否则用户扫完
-   * 只会看到一句「请求失败（HTTP 400）」，像是没反应。
+   * Long-poll scan confirmation; expired tokens request a fresh QR rather than a generic
+   * failure.
    */
   async confirmQr(challenge, {onRotate} = {}) {
     let current = challenge;
@@ -120,7 +116,7 @@ export class RainLoginClient {
       try {
         result = await this.request('/api/v3/user/login/app-web-login', {token: current.token}, {timeoutMs: remaining});
       } catch (error) {
-        // token 失效 / 过期：换一张码重新等，不把它当成失败
+        // Restart scanning after token expiry.
         if (/HTTP 400|HTTP 401|HTTP 403/.test(error.message || '')) {
           if (attempt === 2) throw new Error('二维码已失效，请点「刷新二维码」重试');
           current = await this.createQr();
@@ -131,39 +127,32 @@ export class RainLoginClient {
       }
       const data = result.data || {}, userId = data.UserID ?? data.user_id, auth = data.Auth ?? data.auth;
       if (userId == null || !auth) {
-        // 没人扫码时正常返回 {code:0,data:null}：继续等下一轮
         if (attempt === 2) throw new Error('未收到扫码确认，请重新扫码');
         continue;
       }
-      // 拿到 UserID/Auth 后必须换到 sessionid，否则后续同步全是未登录
+      // Exchange UserID/Auth for sessionid before synchronization.
       await this.establishSession(userId, auth);
       return {userId, auth};
     }
     throw new Error('未收到扫码确认，请重新扫码');
   }
 
-  /** {UserID,Auth} 换取网页会话 Cookie（sessionid）；/pc/web_login 走的是网页登录分支 */
+  /** Exchange credentials through the web-login branch for session cookies. */
   async establishSession(userId, auth) {
     await this.prepare();
     const result = await this.request('/pc/web_login', {UserID: userId, Auth: auth}, {json: false});
-    // 这个接口可能不回 JSON，真正的判据是 CookieManager 里有没有 sessionid
+    // A sessionid cookie confirms this non-JSON response.
     void result;
     if (!await this.cookie('sessionid')) throw new Error('未能建立网页登录会话，请重试');
   }
 
-  /** 这个站点上扫码登录服务的 WebSocket 地址 */
   qrSocketUrl() {
     return `wss://${this.site}${QR_WS_PATH}`;
   }
-  /** 学堂在线协议开一张二维码用的请求体 */
   static qrRequest() {
     return JSON.stringify({op: 'requestlogin', role: 'web', version: 1.4, type: 'qrcode', from: 'web'});
   }
-  /**
-   * 解析 WS 上收到的扫码消息。
-   * 注意 ticket 是微信那张二维码**图片**地址，qrcode 才是要编码成码的文本；
-   * 拿 ticket 去编码会生成一张指向图片的死链，扫了没反应。
-   */
+  /** Encode qrcode text, not ticket image URLs, when parsing scan events. */
   static parseQrMessage(raw) {
     let payload;
     try { payload = JSON.parse(raw); } catch { return null; }

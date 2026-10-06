@@ -1,40 +1,25 @@
-// 雨课堂通知组件 · 课简扩展组件（apiVersion 3，kind = extension）
-//
-// 宿主会在雨课堂自己的域名下开一个看不见的 WebView，把这份脚本注入进去，再调用下面导出的函数：
-// - checkLogin(ctx)：登录页上反复调用，登上了就返回账号，宿主据此关掉登录页
-// - sync(ctx)：后台定时调用，返回作业 / 考试 / 公告条目，宿主负责通知、日历和写进课表
-//
-// 所有请求都走 ctx.network.fetch，也就是页面自己的 fetch：同源、自动带上登录 Cookie，
-// 宿主只放行 manifest 里 allowedHosts 列出的几个雨课堂站点。
+// Component entry exports login checks, synchronization and item actions. Allowlisted same-origin fetch preserves the platform session.
 
 const DEFAULT_SITE = "changjiang.yuketang.cn";
 
-/** 同时在飞的请求数：课程多时一门一门串着查太慢，一下全放出去又像刷接口 */
 const CONCURRENCY = 4;
 
-/** 作业截止时间要一份一份查 leaf_info，查过的缓存这么久，免得每次同步都把所有作业再问一遍 */
+/** Cache per-assignment deadline lookups to avoid querying every item on each sync. */
 const DEADLINE_TTL_MS = 12 * 60 * 60 * 1000;
 
-/** 交过的试卷不会再变回未交，缓存下来就不用每次都去问 cover */
 const EXAM_DONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** 分页读取公告，不再只保留最近十条；图片与附件地址随条目一起交给宿主。 */
+/** Read announcement pages and retain image and attachment URLs. */
 const ANNOUNCEMENT_PAGE_SIZE = 30;
 
-/** 评测类型 id → 名称（score_detail 里的 evaluation_id） */
 const EVALUATION_LABELS = { 11: "作业", 2000: "章节测试", 12: "考试" };
 
-/** 习题叶子（作业 / 课后作业 / 章节测试）；视频、课件、简介都不是提醒对象 */
 const EXERCISE_LEAF_TYPE = 6;
 
-/** 学习日志里的试卷 */
 const ACTIVITY_EXAM = 5;
 
 class LoginRequiredError extends Error {}
 
-// ---------------------------------------------------------------------------
-// 入口
-// ---------------------------------------------------------------------------
 
 export async function checkLogin(ctx) {
   const api = createApi(ctx);
@@ -48,7 +33,7 @@ export async function checkLogin(ctx) {
   }
 }
 
-/** 已读必须经官方接口确认，失败时不返回 done，也不修改本地状态。 */
+/** Return done only after official confirmation; failures leave state unchanged. */
 export async function performItemAction(ctx) {
   if (ctx.action?.type !== "markRead") throw new Error("不支持此内容操作");
   const itemId = String(ctx.action.itemId || "");
@@ -117,7 +102,7 @@ export async function sync(ctx) {
     throw error;
   }
 
-  // 往期课程只同步公告；作业和考试仍以当前学期为主，避免历史内容抢占首页。
+  // Archive courses supply announcements only; current-term tasks retain priority.
   if (settings.syncAnnouncement !== false && historicalAnnouncements) {
     const oldCourses = courses.filter((course) => !picked.includes(course));
     try {
@@ -155,9 +140,6 @@ export async function sync(ctx) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// 各类条目
-// ---------------------------------------------------------------------------
 
 async function homeworkOf(api, course, state, now) {
   const sku = await api.skuOf(course.cid);
@@ -171,7 +153,6 @@ async function homeworkOf(api, course, state, now) {
     const done = exerciseDone(leaf);
     const key = `${course.cid}:${leaf.id}`;
     let cached = state.deadlines[key];
-    // 已完成的不必再查截止时间：没有提醒价值，缓存里有就用，没有就不查
     if (!done && (!cached || now - cached.at > DEADLINE_TTL_MS)) {
       const dueAt = await api.leafDeadline(course.cid, leaf.id);
       cached = { dueAt, at: now };
@@ -205,7 +186,6 @@ async function examsOf(api, course, state, now) {
     const dueAt = toMillis(exam.deadline);
     let status = state.exams[key];
     const stale = !status || (status.done ? now - status.at > EXAM_DONE_TTL_MS : true);
-    // 截止一天以上的就不再问状态了：结果不会再变，也没有提醒价值
     const expired = dueAt && dueAt < now - 24 * 60 * 60 * 1000;
     if (stale && !expired) {
       status = { ...(await api.examStatus(course.cid, examId)), at: now };
@@ -280,9 +260,6 @@ async function systemMessagesOf(api) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// 雨课堂接口
-// ---------------------------------------------------------------------------
 
 function createApi(ctx) {
   const site = siteOf(ctx.settings);
@@ -294,8 +271,7 @@ function createApi(ctx) {
     return raw || "";
   }
 
-  // v3 接口（/api/v3/…、/c27/online_courseware/…）要这一套头；少了 xtbz 会回「incorrect xtbz」，
-  // 多带 x-client: app 反而一律 UNAUTHENTICATED
+  // These endpoint families require xtbz; x-client: app selects an incompatible authentication path.
   function v3Headers(cid) {
     const headers = {
       xtbz: "ykt",
@@ -309,7 +285,6 @@ function createApi(ctx) {
     return headers;
   }
 
-  // mooc-api 这一路学校 id 固定填 0
   function moocHeaders(cid) {
     return {
       xtbz: "ykt",
@@ -335,7 +310,6 @@ function createApi(ctx) {
     try {
       json = JSON.parse(text);
     } catch (_) {
-      // 未登录时部分接口直接回登录页 HTML
       if (/<html/i.test(text)) throw new LoginRequiredError("登录已失效");
       throw new Error(`返回的不是 JSON：${path}`);
     }
@@ -360,7 +334,7 @@ function createApi(ctx) {
   }
 
   return {
-    // 官网学生端读取 topic 详情来记录阅读；read/info 只是教师查看阅读名单的 GET 接口。
+    // Student topic-detail access records reading; read/info lists readers for teachers.
     async markAnnouncementRead(cid, id) {
       const result = await getJson(`/v/discussion/v2/topic/${encodeURIComponent(id)}/?classroom_id=${encodeURIComponent(cid)}`, v3Headers(cid));
       if (result?.success !== true || !result?.data?.data?.topic) throw new Error(result?.msg || "官方未确认公告详情读取成功");
@@ -387,7 +361,7 @@ function createApi(ctx) {
       return courses;
     },
 
-    // 课程列表在登录过期后还会照样回数据，靠不住；basic-info 才会老老实实回 UNAUTHENTICATED
+    // Course lists may survive session expiry; basic-info is the authoritative login check.
     async account() {
       const json = await getJson("/api/v3/user/basic-info", v3Headers());
       const data = json?.data;
@@ -413,7 +387,7 @@ function createApi(ctx) {
       return Array.isArray(leaves) ? leaves : [];
     },
 
-    // 截止时间：score_deadline 优先，为 0 时按课程结课时间（和官网「未完成」一致）
+    // Prefer score_deadline, falling back to course completion when zero.
     async leafDeadline(cid, leafId) {
       const json = await getJson(`/mooc-api/v1/lms/learn/leaf_info/${cid}/${leafId}/`, moocHeaders(cid));
       const data = json?.data || {};
@@ -426,7 +400,7 @@ function createApi(ctx) {
       return Array.isArray(list) ? list : [];
     },
 
-    // cover.result.status：0 未作答，1 答题中，4/5 已交卷，6 缺考，其余 >1 已截止
+    // Cover statuses distinguish unanswered, active, submitted and expired attempts.
     async examStatus(cid, examId) {
       const json = await getJson(`/v/exam/cover?exam_id=${encodeURIComponent(examId)}&classroom_id=${cid}`);
       const data = json?.data || {};
@@ -474,16 +448,13 @@ function createApi(ctx) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// 小工具
-// ---------------------------------------------------------------------------
 
 function siteOf(settings) {
   const site = String(settings?.site || DEFAULT_SITE).trim().toLowerCase();
   return /^[a-z0-9.-]+\.yuketang\.cn$/.test(site) ? site : DEFAULT_SITE;
 }
 
-/** 只留当前学期：课程列表里历年的课都在，全拉一遍又慢又吵 */
+/** Limit task synchronization to the latest term. */
 function pickCourses(courses, onlyCurrentTerm) {
   if (!onlyCurrentTerm) return courses;
   const latest = Math.max(0, ...courses.map((c) => c.term || 0));
@@ -491,7 +462,7 @@ function pickCourses(courses, onlyCurrentTerm) {
   return courses.filter((c) => !c.term || c.term === latest);
 }
 
-/** 完成度以答题进度为准：「3/10」这种 schedule_detail 比 schedule 小数更准 */
+/** Prefer explicit answered/total progress over fractional schedule values. */
 function exerciseDone(leaf) {
   const detail = typeof leaf.schedule_detail === "string" ? leaf.schedule_detail : "";
   const match = /^(\d+)\s*\/\s*(\d+)$/.exec(detail.trim());
@@ -506,7 +477,8 @@ function progressText(leaf) {
 }
 
 /**
- * 平台的时间有三种写法：毫秒、秒、「2025-12-08 12:18:24」（北京时间）。统一成毫秒，认不出就 null。
+ * Normalize seconds, milliseconds or platform wall time to milliseconds; null when
+ * unrecognized.
  */
 function toMillis(value) {
   if (value == null || value === "" || value === 0 || value === "0") return null;
@@ -521,11 +493,11 @@ function toMillis(value) {
   return Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h) - 8, Number(mi), Number(s));
 }
 
-/** 正文、上传图片及所有附件都独立保留；只接受可读取的网页资源地址。 */
+/** Retain text, uploaded images and attachments separately; accept readable web URLs only. */
 function noticeContent(raw, base, row = {}) {
   let content = raw;
   if (typeof raw === "string" && /^\s*\{/.test(raw)) {
-    try { content = JSON.parse(raw); } catch (_) { /* 普通文本仍按正文读取 */ }
+    try { content = JSON.parse(raw); } catch (_) {   }
   }
   const obj = content && typeof content === "object" ? content : {};
   const html = typeof content === "string" ? content : String(obj.text || obj.app_text || "");
@@ -560,7 +532,6 @@ function noticeContent(raw, base, row = {}) {
     for (const key of ["upload_images", "images", "image_list"]) values(source[key]).forEach(addImage);
     for (const key of ["accessory_list", "attachments", "file_list"]) values(source[key]).forEach(addAttachment);
   }
-  // 正文内嵌图和链接附件不一定出现在上面的结构化字段里。
   for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
     addImage({ url: htmlAttribute(match[0], "data-src") || htmlAttribute(match[0], "src"), alt: htmlAttribute(match[0], "alt") });
   }
@@ -578,7 +549,7 @@ function assetUrl(value, base) {
   try {
     const url = new URL(decodeHtml(value.trim()), base);
     if (!/^https?:$/.test(url.protocol) || url.username || url.password) return "";
-    // 图片和下载走 HTTPS，避免明文资源被 Android 拦截。
+    // Use HTTPS for media to avoid cleartext blocking.
     url.protocol = "https:";
     return url.href;
   } catch (_) { return ""; }
@@ -629,7 +600,7 @@ function loadState(ctx) {
   };
 }
 
-/** 缓存只留近两个月用过的，老课的条目别一直攒着 */
+/** Prune cache entries unused for two months. */
 function saveState(ctx, state, now) {
   if (!ctx.state?.set) return;
   const keep = (map) => {
@@ -657,5 +628,5 @@ function messageOf(error) {
   return error && error.message ? error.message : String(error);
 }
 
-// 单测要用到的纯函数；宿主只认 checkLogin / sync
+// Expose pure helpers for tests alongside runtime entry exports.
 export const __test__ = { toMillis, htmlToText, exerciseDone, pickCourses, siteOf, noticeContent, assetUrl };
