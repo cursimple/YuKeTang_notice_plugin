@@ -49,7 +49,7 @@ function bindHeader(){
 
 function aboutBody(){
  const m=manifest(),repo=m.homepage||'';
- return `<div class="group about-panel"><div class="row"><span class="type-tile">${icon('info')}</span><span class="row-copy"><strong>${esc(m.name||'组件')}</strong><small>${esc(m.publisher||'')} · ${esc(m.extension?.title||'')}</small></span></div><button class="nav-row" id="about-version"><span class="row-copy"><span>版本</span><small>v${esc(m.version||'-')} · </small></span>${icon('next')}</button>${repo?`<button class="nav-row" id="about-repo"><span class="row-copy"><span>开源仓库</span><small>${esc(repo)}</small></span>${icon('external')}</button>`:''}</div>`;
+ return `<div class="group about-panel"><div class="row"><span class="type-tile">${icon('info')}</span><span class="row-copy"><strong>${esc(m.name||'组件')}</strong><small>${esc(m.publisher||'')} · ${esc(m.extension?.title||'')}</small></span></div><button class="nav-row" id="about-version"><span class="row-copy"><span>版本</span><small>v${esc(m.version||'-')}</small></span>${icon('next')}</button>${repo?`<button class="nav-row" id="about-repo"><span class="row-copy"><span>开源仓库</span><small>${esc(repo)}</small></span>${icon('external')}</button>`:''}</div>`;
 }
 
 function openAbout(){
@@ -64,14 +64,14 @@ function openAbout(){
 }
 
 function openHiddenTools(){
- sheet('高级诊断',`<div class="group"><div class="row"><span class="row-copy"><strong>雨课堂组件调试</strong><small>检查小组件渲染、同步状态和宿主日志</small></span></div><button class="nav-row" id="dev-refresh"><span class="row-copy"><span>刷新小组件</span><small>重新绘制桌面实例</small></span>${icon('sync')}</button><button class="nav-row" id="dev-sync"><span class="row-copy"><span>立即同步</span><small>调用雨课堂组件同步流程</small></span>${icon('refresh')}</button><button class="nav-row" id="dev-logs"><span class="row-copy"><span>查看调试日志</span><small>显示最近的组件运行日志</small></span>${icon('bug')}</button><button class="nav-row danger" id="dev-disable"><span class="row-copy"><span>关闭高级工具</span><small>关闭课简的隐藏入口</small></span>${icon('lock')}</button></div><pre id="dev-log-output" hidden></pre>`,root=>{
-  root.querySelector('#dev-refresh').onclick=()=>sdk.request('debug.refreshWidget').then(()=>toast('已请求刷新小组件'));
-  root.querySelector('#dev-sync').onclick=()=>request('sync').then(()=>toast('同步完成'));
-  root.querySelector('#dev-logs').onclick=async()=>{
-   const out=root.querySelector('#dev-log-output');out.hidden=false;out.textContent='读取中…';
+ sheet('诊断工具',`<div class="group"><div class="row"><span class="row-copy"><strong>雨课堂组件诊断</strong><small>检查小组件渲染、同步状态和宿主日志</small></span></div><button class="nav-row" id="diag-refresh"><span class="row-copy"><span>刷新小组件</span><small>重新绘制桌面实例</small></span>${icon('sync')}</button><button class="nav-row" id="diag-sync"><span class="row-copy"><span>立即同步</span><small>调用雨课堂组件同步流程</small></span>${icon('refresh')}</button><button class="nav-row" id="diag-logs"><span class="row-copy"><span>查看调试日志</span><small>显示最近的组件运行日志</small></span>${icon('bug')}</button><button class="nav-row danger" id="diag-disable"><span class="row-copy"><span>关闭隐藏工具</span><small>关闭隐藏入口</small></span>${icon('lock')}</button></div><pre id="diag-log-output" hidden></pre>`,root=>{
+  root.querySelector('#diag-refresh').onclick=()=>sdk.request('debug.refreshWidget').then(()=>toast('已请求刷新小组件'));
+  root.querySelector('#diag-sync').onclick=()=>request('sync').then(()=>toast('同步完成'));
+  root.querySelector('#diag-logs').onclick=async()=>{
+   const out=root.querySelector('#diag-log-output');out.hidden=false;out.textContent='读取中…';
    try{const rows=await sdk.request('debug.logs');out.textContent=(rows||[]).map(x=>`${new Date(x.time).toLocaleTimeString()} [${x.level}] ${x.event} ${x.message||''}`).join('\\n')||'暂无组件日志';}catch(e){out.textContent=e.message;}
   };
-  root.querySelector('#dev-disable').onclick=()=>sdk.request('debug.advancedTools',{enabled:false}).then(()=>{toast('已关闭高级工具');document.querySelector('#sheet-close')?.click();});
+  root.querySelector('#diag-disable').onclick=()=>sdk.request('debug.advancedTools',{enabled:false}).then(()=>{toast('已关闭隐藏工具');document.querySelector('#sheet-close')?.click();});
  });
 }
 const legend=()=>`<div class="legend" aria-label="颜色图例"><span><i class="dot pending"></i>待完成</span><span><i class="dot done"></i>已完成</span><span><i class="dot notice"></i>未读公告</span><span><i class="dot read"></i>已读 / 往期</span></div>`;
