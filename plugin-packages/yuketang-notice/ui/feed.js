@@ -38,12 +38,41 @@ function header(signed){
  let sub;
  if(!signed)sub=`<span>${data.loginState==='expired'?'登录已过期':'未连接账号'}</span>`;
  else{const synced=data.lastSyncAt?`${when(data.lastSyncAt)} 同步`:'尚未同步';sub=`<i class="live${syncing?' busy':''}"></i><span>${esc(data.account?.name||'已连接')} · ${syncing?'正在同步…':synced}</span>`;}
- return `<header class="top feed-header"><div class="title-block"><h1>${title}</h1><div class="subline">${sub}</div></div>${signed?iconButton('sync','sync','同步课堂'):''}${iconButton('settings','settings','组件设置')}</header>`;
+ return `<header class="top feed-header"><div class="title-block"><h1>${title}</h1><div class="subline">${sub}</div></div>${signed?iconButton('sync','sync','同步课堂'):''}${iconButton('settings','settings','组件设置')}${iconButton('info','about','关于组件')}</header>`;
 }
 function bindHeader(){
  const b=document.getElementById('settings');if(b)b.onclick=()=>request('ui.settings');
  const s=document.getElementById('sync');
  if(s){s.className='icon-btn'+(syncing?' syncing':'');s.disabled=syncing;s.onclick=async()=>{syncing=true;error='';render();const r=await request('sync');syncing=false;render();if(r!==undefined&&!error)toast(r?.count!=null?`同步完成 · ${r.count} 条内容`:'同步完成');};}
+ const about=document.getElementById('about');if(about)about.onclick=openAbout;
+}
+
+function aboutBody(){
+ const m=manifest(),repo=m.homepage||'';
+ return `<div class="group about-panel"><div class="row"><span class="type-tile">${icon('info')}</span><span class="row-copy"><strong>${esc(m.name||'组件')}</strong><small>${esc(m.publisher||'')} · ${esc(m.extension?.title||'')}</small></span></div><button class="nav-row" id="about-version"><span class="row-copy"><span>版本</span><small>v${esc(m.version||'-')} · </small></span>${icon('next')}</button>${repo?`<button class="nav-row" id="about-repo"><span class="row-copy"><span>开源仓库</span><small>${esc(repo)}</small></span>${icon('external')}</button>`:''}</div>`;
+}
+
+function openAbout(){
+ sheet('关于组件',aboutBody(),root=>{
+  root.querySelector('#about-repo')?.addEventListener('click',()=>sdk.request('ui.openExternal',{url:manifest().homepage}));
+  let taps=0,last=0;
+  root.querySelector('#about-version')?.addEventListener('click',()=>{
+   const nowMs=Date.now();if(nowMs-last>3000)taps=0;last=nowMs;
+   if(++taps>=7){taps=0;openHiddenTools();}
+  });
+ });
+}
+
+function openHiddenTools(){
+ sheet('高级诊断',`<div class="group"><div class="row"><span class="row-copy"><strong>雨课堂组件调试</strong><small>检查小组件渲染、同步状态和宿主日志</small></span></div><button class="nav-row" id="dev-refresh"><span class="row-copy"><span>刷新小组件</span><small>重新绘制桌面实例</small></span>${icon('sync')}</button><button class="nav-row" id="dev-sync"><span class="row-copy"><span>立即同步</span><small>调用雨课堂组件同步流程</small></span>${icon('refresh')}</button><button class="nav-row" id="dev-logs"><span class="row-copy"><span>查看调试日志</span><small>显示最近的组件运行日志</small></span>${icon('bug')}</button><button class="nav-row danger" id="dev-disable"><span class="row-copy"><span>关闭高级工具</span><small>关闭课简的隐藏入口</small></span>${icon('lock')}</button></div><pre id="dev-log-output" hidden></pre>`,root=>{
+  root.querySelector('#dev-refresh').onclick=()=>sdk.request('debug.refreshWidget').then(()=>toast('已请求刷新小组件'));
+  root.querySelector('#dev-sync').onclick=()=>request('sync').then(()=>toast('同步完成'));
+  root.querySelector('#dev-logs').onclick=async()=>{
+   const out=root.querySelector('#dev-log-output');out.hidden=false;out.textContent='读取中…';
+   try{const rows=await sdk.request('debug.logs');out.textContent=(rows||[]).map(x=>`${new Date(x.time).toLocaleTimeString()} [${x.level}] ${x.event} ${x.message||''}`).join('\\n')||'暂无组件日志';}catch(e){out.textContent=e.message;}
+  };
+  root.querySelector('#dev-disable').onclick=()=>sdk.request('debug.advancedTools',{enabled:false}).then(()=>{toast('已关闭高级工具');document.querySelector('#sheet-close')?.click();});
+ });
 }
 const legend=()=>`<div class="legend" aria-label="颜色图例"><span><i class="dot pending"></i>待完成</span><span><i class="dot done"></i>已完成</span><span><i class="dot notice"></i>未读公告</span><span><i class="dot read"></i>已读 / 往期</span></div>`;
 const skeletonList=()=>`<div class="skeleton skeleton-line" style="width:96px"></div><div class="skeleton skeleton-block" style="min-height:196px"></div>`;
@@ -202,23 +231,6 @@ function openIgnored(){
   (list.length?`<div class="group">${list.map(itemRow).join('')}</div>`:emptyState('没有已忽略的内容','inbox')), root=>bindItems(root));
 }
 
-function confirmRead(x){
- sheet('标记为已读？', `<p>将向雨课堂官方同步已读状态，成功后不再提醒此公告。</p><div class="actions"><button class="secondary" id="read-cancel">取消</button><button class="primary" id="read-confirm">确认已读</button></div><p class="feedback" id="read-feedback" role="status" hidden></p>`, (root)=>{
-  root.querySelector('#read-cancel').onclick=()=>openItem(x);
-  const btn=root.querySelector('#read-confirm');
-  btn.onclick=async()=>{
-   if(btn.disabled)return;btn.disabled=true;btn.textContent='正在同步…';
-   try {
-    const saved=await sdk.request('item.markRead',{itemId:x.id});
-    data=saved;snapshot={...snapshot,data:saved};render();
-    openItem(saved.items.find(item=>item.id===x.id)||x);toast('已读，已同步到雨课堂官方');
-   } catch(e) {
-    const feedback=root.querySelector('#read-feedback');feedback.hidden=false;feedback.textContent=e.message;feedback.className='feedback error';
-    btn.disabled=false;btn.textContent='重试已读同步';
-   }
-  };
- });
-}
 function openItem(x){
  const s=stateOf(x),[cls,text]=stateTag(x),body=x.content||x.summary||'';
  const facts=[];
@@ -238,7 +250,6 @@ function openItem(x){
   root=>{
    const close=root.querySelector('#sheet-close');
    const controls=document.createElement('div');controls.className='detail-actions';
-   if(isNoticeItem(x,manifest())&&!x.done){const read=document.createElement('button');read.className='tonal small';read.textContent='已读';read.onclick=()=>confirmRead(x);controls.append(read);}
    const ignored=isIgnoredItem(x,data,now(),manifest());
    const ignore=document.createElement('button');ignore.className='secondary small';ignore.textContent=ignored?'恢复':'忽略';
    ignore.onclick=async()=>{
@@ -254,4 +265,5 @@ function openItem(x){
   });
 }
 
-sdk.subscribe(value=>{const was=data.loginState;snapshot=value;data=value.data;if(was!==data.loginState&&data.loginState!=='logged_in')document.getElementById('sheet')?.remove();render();});
+let widgetAboutOpened=false;
+sdk.subscribe(value=>{const was=data.loginState;snapshot=value;data=value.data;if(was!==data.loginState&&data.loginState!=='logged_in')document.getElementById('sheet')?.remove();render();if(value.context?.widgetAbout&&!widgetAboutOpened){widgetAboutOpened=true;setTimeout(openAbout,0);}});

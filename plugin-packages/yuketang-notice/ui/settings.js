@@ -51,13 +51,15 @@ function selectFields(){return state.manifest.extension.settings.filter(x=>x.key
 function render(){
  const d=state.data,h=d.host,signed=d.loginState==='logged_in',expired=d.loginState==='expired';
  const name=d.account?.name||'';
- const avatar=signed&&name?esc([...name][0]):icon(signed?'user':'lock');
+ const avatarUrl=d.account?.avatar||'';
+ const avatar=avatarUrl?`<img src="${esc(avatarUrl)}" alt="" loading="lazy" onerror="this.replaceWith(document.createTextNode('${esc(signed&&name?[...name][0]:'')}'))">`
+  :(signed&&name?esc([...name][0]):icon(signed?'user':'lock'));
  const statusLine=!signed?`${icon('info')}<span>登录后，课简会按这里的设置同步和提醒</span>`
   :d.lastError?`${icon('alert')}<span>${esc(d.lastError)}</span>`
   :busy==='sync'?`<span class="spinner"></span><span>正在同步课堂内容…</span>`
   :`${icon('check')}<span>${d.lastSyncAt?`上次同步：${esc(friendlyTime(d.lastSyncAt,tz(),state.context?.nowMillis||Date.now()))}`:'已连接，可以立即同步'}</span>`;
  const keepY=window.scrollY;
- app.innerHTML=`<header class="bar">${iconButton('back','back','返回')}<h1>雨课堂设置</h1></header>
+ app.innerHTML=`<header class="bar"><button class="tonal-btn" id="back" aria-label="返回">${icon('back')}</button><h1>雨课堂设置</h1></header>
  <div class="${first?'stagger':''}" style="display:contents">
  <section class="account-card${signed?'':' off'}" style="--i:0"><span class="avatar">${avatar}</span><span class="row-copy"><strong>${esc(signed?name||'已连接雨课堂':expired?'登录已过期':'还未登录')}</strong><small>${esc(signed?[d.account?.school,siteName()].filter(Boolean).join(' · '):siteName()+' · 登录后开始同步')}</small></span>${signed?'':`<button class="primary small" id="login">${expired?'重新登录':'登录'}</button>`}</section>
  <div class="sync-card" style="--i:1"><button class="primary" id="feed">${icon(signed?'calendar':'link')}${signed?'打开我的课堂':'登录并连接'}</button>${signed?`<button class="tonal-btn${busy==='sync'?' spin':''}" id="sync" aria-label="立即同步"${busy==='sync'?' disabled':''}>${icon('sync')}</button>`:''}</div>

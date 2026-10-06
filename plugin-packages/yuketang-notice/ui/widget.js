@@ -12,7 +12,8 @@ const texts = {
 }[language];
 const tasks = widgetTasks(state, now);
 const moment = item => item.startAt > now ? item.startAt : item.dueAt ?? item.startAt;
-const compact = context.width < 240 || context.height < 150;
+// Reserve compact for genuinely tiny cells; a 4x2 widget should not collapse into compact.
+const compact = context.width < 180 || context.height < 120;
 if (compact) document.body.classList.add('compact');
 document.documentElement.style.setProperty('--font-scale', context.fontScale);
 document.getElementById('title').textContent = texts.title;

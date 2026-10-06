@@ -64,7 +64,8 @@ h3{font-size:calc(14px * var(--font-scale,1));font-weight:600;margin:0}
   padding:max(6px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom));min-height:100vh;min-height:100svh}
 .top,.bar{display:flex;align-items:center;gap:4px;min-height:52px;flex:none}
 .bar h1,.top h1{font-size:calc(20px * var(--font-scale,1));line-height:1.4;font-weight:600;margin:0;flex:1;min-width:0}
-.bar .icon,.bar .icon-btn{margin-left:-8px}
+.bar .icon,.bar .icon-btn,.bar .tonal-btn{margin-left:-8px}
+.account-card .avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block}
 .title-block{flex:1;min-width:0}
 .title-block h1{font-size:calc(20px * var(--font-scale,1));line-height:1.35;font-weight:600;margin:0}
 .title-block .subline{display:flex;align-items:center;gap:6px;font-size:calc(12px * var(--font-scale,1));line-height:1.4;color:var(--muted);
@@ -260,9 +261,10 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:inset 0 0 0 1px v
   width:30px;height:24px;display:grid;place-items:center;border-radius:999px}
 .day.weekend .num{color:var(--muted)}
 .day.today .num{color:var(--accent);font-weight:700}
-.day.today:not(.selected) .num{box-shadow:inset 0 0 0 1.5px var(--accent)}
+.day.today:not(.selected) .num{box-shadow:0 0 0 2px var(--accent)}
 .day.selected{background:var(--accent)}
-.day.selected .num{color:var(--on-accent);font-weight:700}
+.day.selected .num{color:var(--on-accent);font-weight:700;background:transparent}
+.day.today.selected{background:var(--accent)}
 .day.has .num{font-weight:600}
 .dots{height:5px;display:flex;gap:3px;align-items:center}
 .dot{width:5px;height:5px;border-radius:50%;background:var(--accent);flex:none}
