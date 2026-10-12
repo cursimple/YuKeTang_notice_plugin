@@ -50,6 +50,16 @@ test("pendingCount：已读公告不算待完成", () => {
   assert.equal(pendingCount(items, MANIFEST), 0);
 });
 
+test('课件沿用作业筛选和待完成计数，无截止时间不会被当作逾期',()=>{
+ const cards=item({id:'courseware:101:3001',category:'课件',dueAt:null,publishAt:10});
+ const done=item({id:'courseware:101:3002',category:'课件',done:true});
+ assert.equal(kindOf(cards.type,MANIFEST),'task');
+ assert.equal(pendingCount([cards,done],MANIFEST),1);
+ assert.deepEqual(filterFeedItems([cards,done],{type:'homework',status:'pending'},MANIFEST),[cards]);
+ assert.deepEqual(visibleFeedItems({items:[cards],host:{ignoreOverdue:true}},100,MANIFEST),[cards]);
+ assert.equal(anchorOf(cards,'automatic',MANIFEST),10);
+});
+
 
 test("stateOfItem：四种状态各自对应一个颜色", () => {
   assert.equal(stateOfItem(item({ id: "1" }), MANIFEST), "pending");
@@ -156,4 +166,25 @@ test('忽略：默认保留逾期，开启自动忽略后隐藏，可单条恢�
   assert.equal(ignoredFeedItems(data,200).length,1);
   data.host.ignoreOverdue=false;
   assert.equal(ignoredFeedItems(data,200).length,1);
+});
+
+
+test('逾期隐藏包含已完成作业和考试，并保留手动恢复、未截止和未定时内容',async()=>{
+ const {visibleFeedItems,ignoredFeedItems}=await import('../plugin-packages/yuketang-notice/ui/feed-model.js');
+ const data={host:{ignoreOverdue:true},restoredItemIds:['restored'],items:[
+  {id:'homework',type:'homework',dueAt:100,done:true}, {id:'exam',type:'exam',dueAt:100},
+  {id:'restored',type:'exam',dueAt:100,done:true}, {id:'future',type:'exam',dueAt:201},
+  {id:'no-deadline',type:'exam',startAt:100}, {id:'notice',type:'announcement',dueAt:100},
+ ]};
+ assert.deepEqual(visibleFeedItems(data,200).map(x=>x.id),['restored','future','no-deadline','notice']);
+ assert.deepEqual(ignoredFeedItems(data,200).map(x=>x.id),['homework','exam']);
+});
+
+test('打开页面后的时间继续前进，到截止点无需同步即可过滤',async()=>{
+ const {snapshotClock,nextTaskDeadline,visibleFeedItems}=await import('../plugin-packages/yuketang-notice/ui/feed-model.js');
+ const clock=snapshotClock(1000,5000),data={host:{ignoreOverdue:true},items:[{id:'exam',type:'exam',dueAt:1100}]};
+ assert.equal(nextTaskDeadline(data,clock(5050)),1100);
+ assert.equal(visibleFeedItems(data,clock(5099)).length,1);
+ assert.equal(visibleFeedItems(data,clock(5100)).length,0);
+ assert.equal(nextTaskDeadline(data,clock(5100)),null);
 });

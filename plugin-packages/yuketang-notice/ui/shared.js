@@ -1,45 +1,13 @@
+import {materialIcon} from './material-icons.js';
 export const sdk = window.CurSimpleComponent;
 export const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const paths = {
- back:'m14 6-6 6 6 6', next:'m9 6 6 6-6 6', close:'m6 6 12 12M6 18 18 6',
- calendar:'M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z',
- list:'M9 6h12M9 12h12M9 18h12M3 6h1M3 12h1M3 18h1',
- settings:'M4 7h16M4 17h16M8 4v6m8 4v6', bell:'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4',
- sync:'M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 14 6M4 12a8 8 0 0 0 14 6',
- user:'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM4 21v-2a8 8 0 0 1 16 0v2',
- check:'m5 12 4 4L19 6', lock:'M6 10h12v11H6ZM8 10V6a4 4 0 0 1 8 0v4',
- link:'m9 15 6-6M7 16l-1 1a4 4 0 0 1-5-5l5-5a4 4 0 0 1 6 0m0 10a4 4 0 0 0 6 0l5-5a4 4 0 0 0-5-5l-1 1',
- book:'M4 3h13a3 3 0 0 1 3 3v15H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3m-3 15a3 3 0 0 1 3-3h14',
- refresh:'M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5',
- alert:'M12 3 2.5 20h19L12 3Zm0 7v4.5m0 3h.01',
- file:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 0v6h6',
- download:'M12 3v11m0 0 4-4m-4 4-4-4M4 18v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1',
- copy:'M9 9h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z' +
-   '|M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
- info:'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 7h.01m0 3v4',
- edit:'M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Zm9.5-13.5 4 4',
- clock:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4v5l3 2',
- megaphone:'M3 10v4a1 1 0 0 0 1 1h2l5 4V5L6 9H4a1 1 0 0 0-1 1Zm12-2a5 5 0 0 1 0 8m3-11a9 9 0 0 1 0 14',
- globe:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z',
- phone:'M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm3 16h2',
- shield:'M12 3 5 6v5c0 4.5 3 8.4 7 10 4-1.6 7-5.5 7-10V6l-7-3Zm-3 9 2 2 4-4',
- scan:'M4 8V5a1 1 0 0 1 1-1h3m8 0h3a1 1 0 0 1 1 1v3m0 8v3a1 1 0 0 1-1 1h-3m-8 0H5a1 1 0 0 1-1-1v-3M8 12h8',
- inbox:'M3 13h5l2 3h4l2-3h5M5 5h14l2 8v6H3v-6l2-8Z',
- trash:'M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3',
- logout:'M15 4h4v16h-4M10 8l-4 4 4 4m-4-4h11',
- swap:'M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4m4 4H7',
- zoomIn:'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4-4M11 8v6M8 11h6',
- zoomOut:'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4-4M8 11h6',
- eye:'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Zm10-3a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z',
- folder:'M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z',
-};
-export const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${(paths[name] || paths.book).split('|').map(d=>`<path d="${d}"/>`).join('')}</svg>`;
+export const icon = name => materialIcon(name) || materialIcon('info');
 export const iconButton = (id,name,label) => `<button class="icon" id="${id}" aria-label="${label}">${icon(name)}</button>`;
 export function applyTheme(state) {
  const scale=Number(state?.context?.fontScale);
  if(Number.isFinite(scale)&&scale>0)document.documentElement.style.setProperty("--font-scale",String(scale));
  const t=state?.context?.theme;if(!t)return;
- const map={background:'bg',surface:'card',surfaceVariant:'group',surfaceContainerLow:'surface-low',onSurface:'text',onSurfaceVariant:'muted',outlineVariant:'line',primary:'accent',onPrimary:'on-accent',primaryContainer:'accent-soft',onPrimaryContainer:'on-soft',error:'danger',errorContainer:'danger-soft'};
+ const map={background:'bg',surface:'card',surfaceVariant:'group',surfaceContainerLow:'surface-low',onSurface:'text',onSurfaceVariant:'muted',outlineVariant:'line',primary:'accent',onPrimary:'on-accent',primaryContainer:'accent-soft',onPrimaryContainer:'on-soft',error:'danger',onError:'tool-on-error',errorContainer:'danger-soft'};
  for(const [key,value] of Object.entries(map))if(/^#[\da-f]{6,8}$/i.test(t[key]||''))document.documentElement.style.setProperty('--'+value,t[key]);
  if(/^#[\da-f]{6}$/i.test(t.primary||''))document.documentElement.style.setProperty('--accent-line',t.primary+'8c');
  document.documentElement.style.colorScheme=t.dark?'dark':'light';
@@ -111,39 +79,82 @@ export function bindAll(root, parts) { parts.forEach(p => p?.bind?.(root)); }
 
 export function message(text, error=false) {const el=document.getElementById('feedback');if(el){el.textContent=text;el.hidden=!text;el.className=error?'feedback error':'feedback';}}
 let activeClose;
-/** Replace open-sheet content without restarting entrance animation or losing scroll state. */
-export function sheet(title, body, bind) {
+const overlayBackHandlers = [];
+/** Temporarily route the host's back action to an overlay above a sheet. */
+export function pushBackHandler(close) {
+ overlayBackHandlers.push(close);sheetBackState(true);
+ return()=>{const index=overlayBackHandlers.lastIndexOf(close);if(index>=0)overlayBackHandlers.splice(index,1);sheetBackState(Boolean(activeClose));};
+}
+const reducedMotion=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+window.addEventListener('cursimple-back',()=>{(overlayBackHandlers.at(-1)||activeClose)?.();});
+const sheetBackState=enabled=>{if(sdk)sdk.request('ui.navigation',{canGoBack:enabled||overlayBackHandlers.length>0}).catch(()=>{});};
+/** Keep the sheet container stable; animate only navigation, never background refreshes. */
+export function sheet(title, body, bind, {back=false,onClose}={}) {
  let overlay=document.getElementById('sheet');
  const reuse=overlay&&!overlay.classList.contains('closing');
- const keep=reuse&&overlay.dataset.title===title?overlay.querySelector('.sheet-body')?.scrollTop:0;
- if(!reuse){activeClose?.();overlay?.remove();overlay=document.createElement('div');overlay.id='sheet';overlay.className='scrim';}
+ const changed=reuse&&overlay.dataset.title!==title;
+ const previousFocus=document.activeElement;
+ const focused=reuse&&overlay.contains(previousFocus)?previousFocus:null;
+ const focusAttribute=focused&&['data-host','data-setting','data-rule-key','aria-label'].find(name=>focused.hasAttribute(name));
+ const focusSelector=focused?.id?'#'+CSS.escape(focused.id):focusAttribute?`[${focusAttribute}="${CSS.escape(focused.getAttribute(focusAttribute))}"]`:null;
+ const focusedValue=focusSelector&&previousFocus.matches('input:not([type=checkbox]),textarea')?previousFocus.value:undefined;
+ const selection=focusSelector&&typeof previousFocus.selectionStart==='number'?[previousFocus.selectionStart,previousFocus.selectionEnd]:null;
+ const keep=reuse&&!changed?overlay.querySelector('.sheet-body')?.scrollTop:0;
+ overlay?._finishTransition?.();
+ let previous=null,oldHeight=0,previousScroll=0;
+ if(changed&&!reducedMotion()){
+  const panel=overlay.querySelector('.sheet'),content=overlay.querySelector('.sheet-body');
+  oldHeight=panel.getBoundingClientRect().height;
+  previous=content.cloneNode(true);previous.inert=true;previous.setAttribute('aria-hidden','true');
+  previous.querySelectorAll('[id]').forEach(x=>x.removeAttribute('id'));
+  previous.classList.add('sheet-previous');
+  previous.style.top=content.offsetTop+'px';previous.style.height=content.getBoundingClientRect().height+'px';
+  previousScroll=content.scrollTop;
+ }
+ if(!reuse){
+  activeClose?.();overlay?.remove();overlay=document.createElement('div');overlay.id='sheet';overlay.className='scrim';
+  overlay.innerHTML=`<section class="sheet" role="dialog" aria-modal="true"><div class="sheet-grip"><div class="sheet-handle"></div><header><h2></h2>${iconButton('sheet-close','close','关闭')}</header></div><div class="sheet-body"></div></section>`;
+  overlay._focus=previousFocus;
+  document.body.append(overlay);document.getElementById('app').inert=true;document.body.classList.add('sheet-open');sheetBackState(true);
+ }
  overlay.dataset.title=title;
- overlay.innerHTML=`<section class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="sheet-grip"><div class="sheet-handle"></div><header><h2>${esc(title)}</h2>${iconButton('sheet-close','close','关闭')}</header></div><div class="sheet-body">${body}</div></section>`;
- if(reuse){overlay.querySelector('.sheet').style.animation='none';overlay.style.animation='none';}
  const panel=overlay.querySelector('.sheet'),content=overlay.querySelector('.sheet-body');
- if(keep)content.scrollTop=keep;
- const focus=reuse?null:document.activeElement;
+ panel.setAttribute('aria-label',title);overlay.querySelector('h2').textContent=title;
+ content.innerHTML=body;content.scrollTop=keep||0;
  let closed=false;
  const close=()=>{
-  if(closed)return;closed=true;document.removeEventListener('keydown',key);
+  if(closed)return;closed=true;overlay._finishTransition?.();document.removeEventListener('keydown',key);
   if(activeClose===close)activeClose=null;
+  onClose?.();sheetBackState(Boolean(activeClose));
   overlay.classList.add('closing');
-  const done=()=>{overlay.remove();focus?.focus?.();};
-  matchMedia('(prefers-reduced-motion: reduce)').matches?done():setTimeout(done,200);
+  const done=()=>{overlay.remove();if(!document.querySelector('#sheet:not(.closing)')){document.getElementById('app').inert=false;document.body.classList.remove('sheet-open');overlay._focus?.focus?.({preventScroll:true});}};
+  reducedMotion()?done():setTimeout(done,200);
  };
  activeClose=close;
  const key=e=>{if(e.key==='Escape'){e.preventDefault();close();}};
- if(!reuse)document.body.append(overlay);
  overlay.querySelector('#sheet-close').onclick=close;overlay.onclick=e=>{if(e.target===overlay)close();};
  document.removeEventListener('keydown',overlay._key||(()=>{}));overlay._key=key;document.addEventListener('keydown',key);
  const grip=overlay.querySelector('.sheet-grip');let startY=0,lastY=0,lastT=0,velocity=0,dragging=false;
- grip.addEventListener('pointerdown',e=>{if(e.target.closest('button'))return;dragging=true;startY=lastY=e.clientY;lastT=e.timeStamp;velocity=0;panel.style.transition='none';try{grip.setPointerCapture(e.pointerId);}catch{}});
- grip.addEventListener('pointermove',e=>{if(!dragging)return;const dy=Math.max(0,e.clientY-startY);velocity=(e.clientY-lastY)/Math.max(1,e.timeStamp-lastT);lastY=e.clientY;lastT=e.timeStamp;panel.style.transform=`translateY(${dy}px)`;});
+ grip.onpointerdown=e=>{if(e.target.closest('button'))return;overlay._finishTransition?.();dragging=true;startY=lastY=e.clientY;lastT=e.timeStamp;velocity=0;panel.style.transition='none';try{grip.setPointerCapture(e.pointerId);}catch{}};
+ grip.onpointermove=e=>{if(!dragging)return;const dy=Math.max(0,e.clientY-startY);velocity=(e.clientY-lastY)/Math.max(1,e.timeStamp-lastT);lastY=e.clientY;lastT=e.timeStamp;panel.style.transform=`translateY(${dy}px)`;};
  const end=e=>{if(!dragging)return;dragging=false;const dy=Math.max(0,e.clientY-startY);panel.style.transition='';
   if(dy>panel.offsetHeight/4||velocity>0.6){panel.style.transform=`translateY(${panel.offsetHeight}px)`;close();}else panel.style.transform='';};
- grip.addEventListener('pointerup',end);grip.addEventListener('pointercancel',end);
- if(!reuse)overlay.querySelector('#sheet-close').focus({preventScroll:true});
+ grip.onpointerup=end;grip.onpointercancel=end;
  bind?.(overlay,close);
+ if(previous){
+  const newHeight=panel.getBoundingClientRect().height;
+  panel.append(previous);previous.scrollTop=previousScroll;
+  const timing={duration:240,easing:'cubic-bezier(.2,0,0,1)'},direction=back?-1:1;
+  const animations=[
+   panel.animate([{height:oldHeight+'px'},{height:newHeight+'px'}],timing),
+   content.animate([{opacity:0,transform:`translateX(${16*direction}px)`},{opacity:1,transform:'translateX(0)'}],timing),
+   previous.animate([{opacity:1,transform:'translateX(0)'},{opacity:0,transform:`translateX(${-16*direction}px)`}],timing),
+  ];
+  overlay._finishTransition=()=>{animations.forEach(a=>a.cancel());previous.remove();overlay._finishTransition=null;};
+  Promise.all(animations.map(a=>a.finished)).then(()=>overlay._finishTransition?.()).catch(()=>{});
+ }
+ if(!reuse||changed)overlay.querySelector('#sheet-close').focus({preventScroll:true});
+ else if(focusSelector){const focus=content.querySelector(focusSelector);if(focus&&focusedValue!==undefined)focus.value=focusedValue;focus?.focus({preventScroll:true});if(selection)focus?.setSelectionRange?.(...selection);}
 }
 
 export function pickerSheet(title,options,value,onPick,note=''){
@@ -176,7 +187,7 @@ export function friendlyTime(ms,timeZone='Asia/Shanghai',now=Date.now()){
 applyTheme(sdk?.state);sdk?.subscribe(applyTheme);
 
 export function openLightbox(images, index = 0) {
-  document.getElementById('lightbox')?.remove();
+  document.getElementById('lightbox')?._close?.();
   if (!images || !images.length) return;
   let i = Math.max(0, Math.min(index, images.length - 1));
   let scale = 1, tx = 0, ty = 0, lastTap = 0, tapX = 0, tapY = 0;
@@ -219,14 +230,18 @@ export function openLightbox(images, index = 0) {
   };
   const clampView = () => { if (scale <= 1.02) { scale = 1; tx = 0; ty = 0; } };
   const setImage = () => { scale = 1; tx = 0; ty = 0; apply(true); img.src = images[i].url || ''; img.alt = images[i].name || '图片'; count.textContent = `${i + 1} / ${images.length}`; };
-  const close = () => { document.removeEventListener('keydown', onKey); box.remove(); };
-  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  let closed = false, releaseBack = () => {};
+  const previousFocus = document.activeElement;
+  const close = () => { if (closed) return; closed = true; document.removeEventListener('keydown', onKey, true); window.removeEventListener('cursimple-visibility', visibility); releaseBack(); img.removeAttribute('src'); box.remove(); previousFocus?.focus?.({ preventScroll: true }); };
+  const visibility = e => { if (e.detail?.visible === false) close(); };
+  box._close = close;
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(); } };
 
   closeBtn.onclick = close;
   box.append(img, closeBtn, hint, bar);
   if (images.length > 1) {
     const mk = (cls, ic, label, go) => { const b = document.createElement('button'); b.className = `icon-btn lb-nav ${cls}`; b.setAttribute('aria-label', label); b.innerHTML = icon(ic); b.onclick = (e) => { e.stopPropagation(); go(); setImage(); }; return b; };
-    box.append(mk('lb-prev', 'back', '上一张', () => { i = (i - 1 + images.length) % images.length; }),
+    box.append(mk('lb-prev', 'prev', '上一张', () => { i = (i - 1 + images.length) % images.length; }),
                 mk('lb-next', 'next', '下一张', () => { i = (i + 1) % images.length; }), count);
   }
   img.onerror = () => { hint.textContent = '图片加载失败'; hint.classList.remove('off'); };
@@ -284,8 +299,10 @@ export function openLightbox(images, index = 0) {
   img.addEventListener('pointerup', lift);
   img.addEventListener('pointercancel', lift);
   box.addEventListener('click', (e) => { if (e.target === box) close(); });
-  document.addEventListener('keydown', onKey);
+  document.addEventListener('keydown', onKey, true);
+  window.addEventListener('cursimple-visibility', visibility);
   document.body.append(box);
+  releaseBack = pushBackHandler(close); closeBtn.focus();
   setImage();
   setTimeout(() => hint.classList.add('off'), 2600);
 }

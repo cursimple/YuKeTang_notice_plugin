@@ -15,7 +15,7 @@ export function anchorOf(item, source = 'automatic', manifest) {
 
 export function isIgnoredItem(item, data, now = Date.now(), manifest) {
   return (data.ignoredItemIds || []).includes(item.id) || (data.host?.ignoreOverdue === true &&
-    !(data.restoredItemIds || []).includes(item.id) && !item.done && !isNoticeItem(item, manifest) &&
+    !(data.restoredItemIds || []).includes(item.id) && !isNoticeItem(item, manifest) &&
     item.dueAt != null && item.dueAt <= now);
 }
 
@@ -93,3 +93,14 @@ export function statusCounts(items, manifest) {
 export const hasTaskItems = (items, manifest) =>
   (items || []).some(item => !isNoticeItem(item, manifest));
 
+
+/** Advance a host-provided clock between snapshots, including time spent in the background. */
+export function snapshotClock(nowMillis, receivedAt = Date.now()) {
+  const offset = Number.isFinite(nowMillis) ? nowMillis - receivedAt : 0;
+  return (at = Date.now()) => at + offset;
+}
+
+export function nextTaskDeadline(data, now, manifest) {
+  const deadlines = (data.items || []).filter(item => !isNoticeItem(item, manifest) && Number.isFinite(item.dueAt) && item.dueAt > now).map(item => item.dueAt);
+  return deadlines.reduce((next, due) => next == null ? due : Math.min(next, due), null);
+}

@@ -3,12 +3,19 @@ import { widgetTasks } from './widget-model.js';
 const sdk = window.CurSimpleWidget;
 const state = sdk.state;
 const context = state.context;
+const theme = context.theme || {};
+const tokens = {primary:'accent',onPrimary:'on-accent',surfaceContainerLow:'surface',primaryContainer:'row',onSurface:'ink',onSurfaceVariant:'muted',error:'danger'};
+for (const [key, token] of Object.entries(tokens)) {
+  if (/^#[\da-f]{6}$/i.test(theme[key] || '')) document.documentElement.style.setProperty('--'+token, theme[key]);
+}
+document.documentElement.style.colorScheme = theme.dark ? 'dark' : 'light';
+
 const now = context.nowMillis;
 const language = context.language.startsWith('en') ? 'en' : /TW|Hant|HK/.test(context.language) ? 'zh-TW' : 'zh-CN';
 const texts = {
-  'zh-CN': {title:'雨课堂待办',empty:'雨课堂暂无待办',count:n=>`${n} 项`,due:'截止',start:'开始',late:'已逾期',types:{homework:'作业',exam:'考试'}},
-  'zh-TW': {title:'雨課堂待辦',empty:'雨課堂暫無待辦',count:n=>`${n} 項`,due:'截止',start:'開始',late:'已逾期',types:{homework:'作業',exam:'考試'}},
-  en: {title:'YuKeTang tasks',empty:'No YuKeTang tasks',count:n=>`${n} left`,due:'Due',start:'Starts',late:'Overdue',types:{homework:'Assignment',exam:'Exam'}}
+  'zh-CN': {title:'雨课堂待办',empty:'雨课堂暂无待办',count:n=>`${n} 项`,due:'截止',start:'开始',late:'已逾期',courseware:'课件',types:{homework:'作业',exam:'考试'}},
+  'zh-TW': {title:'雨課堂待辦',empty:'雨課堂暫無待辦',count:n=>`${n} 項`,due:'截止',start:'開始',late:'已逾期',courseware:'課件',types:{homework:'作業',exam:'考試'}},
+  en: {title:'YuKeTang tasks',empty:'No YuKeTang tasks',count:n=>`${n} left`,due:'Due',start:'Starts',late:'Overdue',courseware:'Courseware',types:{homework:'Assignment',exam:'Exam'}}
 }[language];
 const tasks = widgetTasks(state, now);
 const moment = item => item.startAt > now ? item.startAt : item.dueAt ?? item.startAt;
@@ -26,7 +33,7 @@ for (const item of tasks.slice(0,8)) {
   const row = document.createElement('article');row.className='task';row.dataset.action='feed';
   const meta = document.createElement('div');meta.className='meta';
   const type = state.manifest.extension.feedTypes.find(type=>type.id===item.type);
-  meta.textContent = [texts.types[item.type] || type?.label,item.course].filter(Boolean).join(' · ');
+  meta.textContent = [item.category==='课件'?texts.courseware:texts.types[item.type] || type?.label,item.course].filter(Boolean).join(' · ');
   const title = document.createElement('div');title.className='title';title.textContent=item.title;
   const timing = document.createElement('div');timing.className='when';
   const at = moment(item);

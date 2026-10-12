@@ -3,11 +3,11 @@
   "kind": "extension",
   "name": "雨课堂通知",
   "publisher": "cursimple",
-  "version": "1.3.7",
-  "versionCode": 147,
-  "apiVersion": 9,
+  "version": "1.3.8",
+  "versionCode": 148,
+  "apiVersion": 11,
   "entry": "main.js",
-  "description": "登录雨课堂后，老师发布的作业、考试和课程公告由课简来提醒：新内容通知、截止前提醒、侧边栏日历，还能自动写进课表事务。",
+  "description": "登录雨课堂后，老师发布的作业、课件、考试和课程公告由课简来提醒：新内容通知、截止前提醒、侧边栏日历，还能自动写进课表事务。",
   "homepage": "https://github.com/cursimple/YuKeTang_notice_plugin",
   "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   "permissions": [
@@ -85,8 +85,8 @@
       {
         "key": "syncHomework",
         "type": "switch",
-        "label": "作业与章节测试",
-        "description": "带截止时间，可以截止前提醒",
+        "label": "作业、课件与章节测试",
+        "description": "同步学习进度；设有截止时间的内容可提前提醒",
         "default": true
       },
       {
@@ -128,7 +128,7 @@
         "key": "hideFinished",
         "type": "switch",
         "label": "隐藏已完成",
-        "description": "做完的作业、交过的试卷、读过的公告不再显示",
+        "description": "做完的作业、读完的课件、交过的试卷和读过的公告不再显示",
         "default": false
       }
     ],
@@ -142,7 +142,7 @@
       {
         "id": "pending",
         "title": "雨课堂待办",
-        "description": "雨课堂组件提供的作业与考试待办",
+        "description": "雨课堂组件提供的作业、课件与考试待办",
         "entry": "ui/widget.html",
         "columns": 4,
         "rows": 2
@@ -152,5 +152,6 @@
   "limits": {
     "timeoutMs": 90000,
     "maxOutputBytes": 2097152
-  }
+  },
+  "minHostVersion": "0.7.10"
 }

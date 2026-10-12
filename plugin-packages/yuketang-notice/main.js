@@ -1,8 +1,9 @@
-// Component entry exports login checks, synchronization and item actions. Allowlisted same-origin fetch preserves the platform session.
+// Allowlisted same-origin fetch preserves the platform session.
 
 const DEFAULT_SITE = "changjiang.yuketang.cn";
 
 const CONCURRENCY = 4;
+const PROFILE_TIMEOUT_MS = 6000;
 
 /** Cache per-assignment deadline lookups to avoid querying every item on each sync. */
 const DEADLINE_TTL_MS = 12 * 60 * 60 * 1000;
@@ -17,8 +18,44 @@ const EVALUATION_LABELS = { 11: "作业", 2000: "章节测试", 12: "考试" };
 const EXERCISE_LEAF_TYPE = 6;
 
 const ACTIVITY_EXAM = 5;
+const ACTIVITY_COURSEWARE = 2;
+// On the student site, leaf 7 is self-study cards. Leaf 8 is a lesson,
+// whose is_finished describes the class, not the student's reading progress.
+const COURSEWARE_LEAF_TYPES = new Set([7, 14]);
 
 class LoginRequiredError extends Error {}
+
+/** Avatar URLs must work inside the host's HTTPS page. */
+export function normalizeAvatarUrl(value) {
+  if (typeof value !== "string") return "";
+  const raw = value.trim();
+  if (!raw || /[\\\u0000-\u001f]/.test(raw)) return "";
+  // Root-relative images retain the authenticated site origin.
+  if (raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  try {
+    const url = new URL(raw.startsWith("//") ? `https:${raw}` : raw);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return "";
+    url.protocol = "https:";
+    return url.href;
+  } catch (_) { return ""; }
+}
+
+function accountAvatar(data, account) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return "";
+  const basic = data.basic_profile || {};
+  const auth = data.auth || {};
+  const ids = [data.user_id, data.id, basic.user_id, auth.user_id, auth.id].filter(v => v != null && v !== "");
+  if (ids.some(id => String(id) !== account.id)) return "";
+  const number = basic.school_number ?? basic.schoolNumber ?? data.school_number ?? data.schoolNumber;
+  if (account.number && number != null && String(number).trim() !== String(account.number).trim()) return "";
+  for (const fields of [basic, data, auth]) {
+    for (const key of ["avatar", "picture", "profile_photo", "profilePhoto", "avatar_96"]) {
+      const url = normalizeAvatarUrl(fields[key]);
+      if (url) return url;
+    }
+  }
+  return "";
+}
 
 
 export async function checkLogin(ctx) {
@@ -33,7 +70,7 @@ export async function checkLogin(ctx) {
   }
 }
 
-// Official read state cannot be written from the student web API, so no actions are exposed.
+// Read status is display-only in this component.
 export async function performItemAction() {
   throw new Error("不支持此内容操作");
 }
@@ -64,6 +101,7 @@ export async function sync(ctx) {
     await runPool(picked, CONCURRENCY, async (course) => {
       const jobs = [];
       if (settings.syncHomework !== false) jobs.push(homeworkOf(api, course, state, now));
+      if (settings.syncHomework !== false) jobs.push(coursewareOf(api, course, state, now, failures));
       if (settings.syncExam !== false) jobs.push(examsOf(api, course, state, now));
       if (settings.syncAnnouncement !== false &&
           (historicalAnnouncements || picked.includes(course))) jobs.push(announcementsOf(api, course));
@@ -122,9 +160,7 @@ export async function sync(ctx) {
 
 
 async function homeworkOf(api, course, state, now) {
-  const sku = await api.skuOf(course.cid);
-  if (!sku) return [];
-  const leaves = await api.scoreDetail(course.cid, sku);
+  const leaves = await api.taskLeaves(course.cid);
   const exercises = leaves.filter(
     (leaf) => leaf.leaf_type === EXERCISE_LEAF_TYPE && leaf.publish_status === 2,
   );
@@ -133,7 +169,7 @@ async function homeworkOf(api, course, state, now) {
     const done = exerciseDone(leaf);
     const key = `${course.cid}:${leaf.id}`;
     let cached = state.deadlines[key];
-    if (!done && (!cached || now - cached.at > DEADLINE_TTL_MS)) {
+    if (!cached || now - cached.at > DEADLINE_TTL_MS) {
       const dueAt = await api.leafDeadline(course.cid, leaf.id);
       cached = { dueAt, at: now };
       state.deadlines[key] = cached;
@@ -156,6 +192,75 @@ async function homeworkOf(api, course, state, now) {
   return items;
 }
 
+async function coursewareOf(api, course, state, now, failures) {
+  const sources = await Promise.allSettled([api.activities(course.cid), api.taskLeaves(course.cid)]);
+  const rows = sources.map((result) => {
+    if (result.status === "fulfilled") return result.value;
+    if (result.reason instanceof LoginRequiredError) throw result.reason;
+    failures.push(`${course.name}: ${messageOf(result.reason)}`);
+    return [];
+  });
+  const byResource = new Map();
+  for (const row of rows[0]) {
+    const resource = resourceId(row.courseware_id);
+    if (Number(row.type) !== ACTIVITY_COURSEWARE || !resource) continue;
+    byResource.set(resource, { activity: row });
+  }
+  const leaves = rows[1].filter((leaf) =>
+    COURSEWARE_LEAF_TYPES.has(Number(leaf.leaf_type)) && Number(leaf.publish_status) === 2,
+  );
+  await runPool(leaves, 2, async (leaf) => {
+    const key = `${course.cid}:${leaf.id}`;
+    let metadata = state.courseware[key];
+    try {
+      if (!metadata || now - metadata.at > DEADLINE_TTL_MS) {
+        metadata = { ...(await api.coursewareLeaf(course.cid, leaf.id)), at: now };
+        if (!metadata.resource) throw new Error("课件资源 ID 缺失");
+        state.courseware[key] = metadata;
+      }
+      if (!metadata.resource) throw new Error("课件资源 ID 缺失");
+      byResource.set(metadata.resource, { ...byResource.get(metadata.resource), leaf, metadata });
+    } catch (error) {
+      if (error instanceof LoginRequiredError) throw error;
+      // A failed chapter lookup must not discard the direct self-study cards.
+      failures.push(`${course.name}: ${messageOf(error)}`);
+    }
+  });
+  return [...byResource].map(([resource, { activity, leaf, metadata }]) => {
+    const explicitDone = activity?.view?.done;
+    const done = explicitDone != null ? flag(explicitDone) : coursewareDone(leaf);
+    const depth = Number(activity?.view?.depth), count = Number(activity?.count);
+    const progress = Number.isFinite(depth) && depth >= 0 && count > 0
+      ? `已阅读 ${Math.min(depth, count)}/${count} 页` : "";
+    const dueAt = toMillis(activity?.end) || toMillis(activity?.deadline) || metadata?.dueAt || null;
+    return {
+      id: `courseware:${course.cid}:${resource}`,
+      type: "homework",
+      title: String(activity?.title || leaf?.leaf_level_title || "课件").trim(),
+      course: course.name,
+      category: "课件",
+      publishAt: toMillis(activity?.create_time) || toMillis(leaf?.advance_release_time) || metadata?.publishAt || null,
+      dueAt,
+      done,
+      summary: ["课件", leaf?.leaf_chapter_title?.trim(), progress, done ? "已读完" : "待阅读",
+        dueAt ? "" : "未设截止时间"].filter(Boolean).join(" · "),
+      url: api.courseUrl(course.cid),
+      historical: false,
+    };
+  });
+}
+
+function flag(value) { return value === true || value === 1 || value === "1"; }
+
+function coursewareDone(leaf) {
+  return Number(leaf?.schedule) >= 1 || leaf?.schedule === "已完成";
+}
+
+function resourceId(value) {
+  if (typeof value === "string") return /^\d+$/.test(value) && !/^0+$/.test(value) ? value : "";
+  return Number.isSafeInteger(value) && value > 0 ? String(value) : "";
+}
+
 async function examsOf(api, course, state, now) {
   const activities = await api.activities(course.cid);
   const exams = activities.filter((a) => a.type === ACTIVITY_EXAM && a.courseware_id);
@@ -163,12 +268,13 @@ async function examsOf(api, course, state, now) {
   await runPool(exams, 2, async (exam) => {
     const examId = String(exam.courseware_id);
     const key = `${course.cid}:${examId}`;
-    const dueAt = toMillis(exam.deadline);
+    const listedDueAt = toMillis(exam.deadline);
     let status = state.exams[key];
-    const stale = !status || (status.done ? now - status.at > EXAM_DONE_TTL_MS : true);
-    const expired = dueAt && dueAt < now - 24 * 60 * 60 * 1000;
+    const stale = !status || (!listedDueAt && status.deadlineChecked !== true) ||
+      (status.done ? now - status.at > EXAM_DONE_TTL_MS : true);
+    const expired = listedDueAt && listedDueAt < now - 24 * 60 * 60 * 1000;
     if (stale && !expired) {
-      status = { ...(await api.examStatus(course.cid, examId)), at: now };
+      status = { ...(await api.examStatus(course.cid, examId)), at: now, deadlineChecked: true };
       state.exams[key] = status;
     }
     items.push({
@@ -179,7 +285,7 @@ async function examsOf(api, course, state, now) {
       category: "考试",
       publishAt: toMillis(exam.create_time),
       startAt: status?.startAt || null,
-      dueAt,
+      dueAt: listedDueAt || status?.dueAt || null,
       done: Boolean(status?.done),
       summary: [
         status?.label,
@@ -245,6 +351,9 @@ function createApi(ctx) {
   const site = siteOf(ctx.settings);
   const base = `https://${site}`;
   let universityId = 0;
+  // Shared only within this sync. Reading progress must refresh on the next run.
+  const activityRequests = new Map();
+  const taskRequests = new Map();
 
   function csrf() {
     const raw = ctx.web?.cookie ? ctx.web.cookie("csrftoken") : cookieFromDocument("csrftoken");
@@ -277,26 +386,35 @@ function createApi(ctx) {
     };
   }
 
-  async function getJson(path, headers) {
-    const response = await ctx.network.fetch(`${base}${path}`, {
-      method: "GET",
-      credentials: "include",
-      headers: { Accept: "application/json, text/plain, */*", ...(headers || {}) },
-    });
-    if (response.status === 401) throw new LoginRequiredError("登录已失效");
-    if (!response.ok) throw new Error(`HTTP ${response.status} ${path}`);
-    const text = await response.text();
-    let json;
+  async function getJson(path, headers, timeoutMs = 0) {
+    const controller = timeoutMs ? new AbortController() : null;
+    let timedOut = false;
+    const timer = controller ? setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs) : null;
     try {
-      json = JSON.parse(text);
-    } catch (_) {
-      if (/<html/i.test(text)) throw new LoginRequiredError("登录已失效");
-      throw new Error(`返回的不是 JSON：${path}`);
-    }
-    if (json && (json.code === 50000 || json.msg === "UNAUTHENTICATED")) {
-      throw new LoginRequiredError("登录已失效");
-    }
-    return json;
+      const response = await ctx.network.fetch(`${base}${path}`, {
+        method: "GET",
+        credentials: "include",
+        headers: { Accept: "application/json, text/plain, */*", ...(headers || {}) },
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+      if (response.status === 401) throw new LoginRequiredError("登录已失效");
+      if (!response.ok) throw new Error(`HTTP ${response.status} ${path}`);
+      const text = await response.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch (_) {
+        if (/<html/i.test(text)) throw new LoginRequiredError("登录已失效");
+        throw new Error(`返回的不是 JSON：${path}`);
+      }
+      if (json && (json.code === 50000 || json.msg === "UNAUTHENTICATED")) {
+        throw new LoginRequiredError("登录已失效");
+      }
+      return json;
+    } catch (error) {
+      if (timedOut) throw new Error("头像资料读取超时");
+      throw error;
+    } finally { if (timer != null) clearTimeout(timer); }
   }
 
   return {
@@ -326,13 +444,28 @@ function createApi(ctx) {
       const json = await getJson("/api/v3/user/basic-info", v3Headers());
       const data = json?.data;
       if (!data || typeof data !== "object" || !data.id) throw new LoginRequiredError("没拿到账号信息");
-      return {
+      const account = {
         id: String(data.id),
         name: data.name || "",
         school: data.school || "",
         number: data.schoolNumber || "",
-        avatar: data.avatar || "",
+        avatar: "",
       };
+      account.avatar = accountAvatar(data, account);
+      // The profile endpoint supplies the current avatar even when basic-info omits it
+      // or retains a default image. Older sites fall back to the web profile.
+      for (const path of ["/mobile-app/api/user/profile", "/api/web_lesson/user_info/"]) {
+        try {
+          const profile = await getJson(path, v3Headers(), PROFILE_TIMEOUT_MS);
+          if (profile?.success === false || [profile?.code, profile?.errcode].some(code => code != null && String(code) !== "0")) continue;
+          const avatar = accountAvatar(profile?.data, account);
+          if (avatar) return { ...account, avatar };
+        } catch (error) {
+          if (error?.name === "AbortError") throw error;
+          // An optional profile failure does not invalidate the v3-verified session.
+        }
+      }
+      return account;
     },
 
     async skuOf(cid) {
@@ -347,6 +480,26 @@ function createApi(ctx) {
       return Array.isArray(leaves) ? leaves : [];
     },
 
+    taskLeaves(cid) {
+      if (!taskRequests.has(cid)) taskRequests.set(cid, (async () => {
+        const sku = await this.skuOf(cid);
+        return sku ? this.scoreDetail(cid, sku) : [];
+      })());
+      return taskRequests.get(cid);
+    },
+
+    async coursewareLeaf(cid, leafId) {
+      const json = await getJson(`/mooc-api/v1/lms/learn/leaf_info/${cid}/${leafId}/`, moocHeaders(cid));
+      const data = json?.data || {};
+      return {
+        resource: resourceId(data.content_info?.leaf_type_id),
+        // Chapter lists can substitute class_end_time here. The leaf detail has
+        // the teacher's actual deadline; zero means no courseware deadline.
+        dueAt: toMillis(data.score_deadline),
+        publishAt: toMillis(data.publish_time),
+      };
+    },
+
     // Prefer score_deadline, falling back to course completion when zero.
     async leafDeadline(cid, leafId) {
       const json = await getJson(`/mooc-api/v1/lms/learn/leaf_info/${cid}/${leafId}/`, moocHeaders(cid));
@@ -354,10 +507,13 @@ function createApi(ctx) {
       return toMillis(data.score_deadline) || toMillis(data.class_end_time) || null;
     },
 
-    async activities(cid) {
-      const json = await getJson(`/v2/api/web/logs/learn/${cid}?actype=-1&page=0&offset=200&sort=-1`);
-      const list = json?.data?.activities;
-      return Array.isArray(list) ? list : [];
+    activities(cid) {
+      if (!activityRequests.has(cid)) activityRequests.set(cid, (async () => {
+        const json = await getJson(`/v2/api/web/logs/learn/${cid}?actype=-1&page=0&offset=200&sort=-1`);
+        const list = json?.data?.activities;
+        return Array.isArray(list) ? list : [];
+      })());
+      return activityRequests.get(cid);
     },
 
     // Cover statuses distinguish unanswered, active, submitted and expired attempts.
@@ -371,6 +527,7 @@ function createApi(ctx) {
         done: raw === 4 || raw === 5,
         label,
         startAt: toMillis(data.start_time) || null,
+        dueAt: toMillis(data.deadline) || null,
       };
     },
 
@@ -557,6 +714,7 @@ function loadState(ctx) {
   return {
     deadlines: state.deadlines && typeof state.deadlines === "object" ? state.deadlines : {},
     exams: state.exams && typeof state.exams === "object" ? state.exams : {},
+    courseware: state.courseware && typeof state.courseware === "object" ? state.courseware : {},
   };
 }
 
@@ -570,7 +728,7 @@ function saveState(ctx, state, now) {
     }
     return out;
   };
-  ctx.state.set("cache", { deadlines: keep(state.deadlines), exams: keep(state.exams) });
+  ctx.state.set("cache", { deadlines: keep(state.deadlines), exams: keep(state.exams), courseware: keep(state.courseware) });
 }
 
 async function runPool(list, limit, worker) {

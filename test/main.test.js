@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkLogin, sync, __test__ } from "../plugin-packages/yuketang-notice/main.js";
+import { checkLogin, sync, normalizeAvatarUrl, __test__ } from "../plugin-packages/yuketang-notice/main.js";
 
 const NOW = Date.UTC(2026, 8, 29, 4, 0, 0);
 
@@ -110,6 +110,102 @@ test("checkLogin：登录了就带回账号，并用课程里的学校 id 填 v3
   assert.equal(basic.headers["X-CSRFToken"], "csrf-123");
 });
 
+test("个人资料的真实头像覆盖 basic-info 的默认头像，并携带网页登录头", async () => {
+  const ctx = makeCtx(fullRoutes({
+    "/api/v3/user/basic-info": { code: 0, data: { ...BASIC.data, avatar: "https://qn-sx.yuketang.cn/default.png" } },
+    "/mobile-app/api/user/profile": { code: 0, data: { basic_profile: {
+      name: "资料里的名字", school_number: "2024001", avatar: "http://qn-sx.yuketang.cn/avatar/custom.jpg?size=96",
+    } } },
+  }));
+  const result = await checkLogin(ctx);
+  assert.equal(result.account.avatar, "https://qn-sx.yuketang.cn/avatar/custom.jpg?size=96");
+  assert.equal(result.account.name, BASIC.data.name);
+  assert.equal(result.account.id, "10001");
+  const call = ctx.calls.find(c => c.url.endsWith('/mobile-app/api/user/profile'));
+  assert.equal(call.headers.xtbz, 'ykt');
+  assert.equal(call.headers['X-Client'], 'web');
+  assert.equal(call.headers['X-CSRFToken'], 'csrf-123');
+  assert.ok(!ctx.calls.some(c => c.url.includes('/api/web_lesson/user_info/')));
+});
+
+test("个人资料不可用时读取网页 auth.picture 头像，同步结果也保留头像", async () => {
+  const ctx = makeCtx(fullRoutes({
+    "/api/web_lesson/user_info/": { data: { user_id: 10001, auth: { id: 10001, picture: "//thirdwx.qlogo.cn/avatar/photo/96" } } },
+  }));
+  const result = await sync(ctx);
+  assert.equal(result.account.avatar, "https://thirdwx.qlogo.cn/avatar/photo/96");
+  assert.ok(result.items.length > 0);
+});
+
+test("头像资料请求失败不影响已通过 v3 校验的会话", async () => {
+  const ctx = makeCtx(fullRoutes({
+    "/api/v3/user/basic-info": { code: 0, data: { ...BASIC.data, picture: "http://qn-sx.yuketang.cn/current.png" } },
+    "/mobile-app/api/user/profile": () => response(403, 'denied'),
+    "/api/web_lesson/user_info/": { code: 50000, msg: "UNAUTHENTICATED" },
+  }));
+  const result = await checkLogin(ctx);
+  assert.equal(result.loggedIn, true);
+  assert.equal(result.account.avatar, "https://qn-sx.yuketang.cn/current.png");
+});
+
+test("头像资料超时会取消请求并继续网页回退，不拖住登录校验", async () => {
+  let aborted = false;
+  const ctx = makeCtx(fullRoutes({
+    "/mobile-app/api/user/profile": (_path, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => { aborted = true; reject(new DOMException('aborted', 'AbortError')); }, { once: true });
+    }),
+    "/api/web_lesson/user_info/": { data: { user_id: 10001, avatar: "https://qn-sx.yuketang.cn/web.png" } },
+  }));
+  const result = await checkLogin(ctx);
+  assert.equal(aborted, true);
+  assert.equal(result.loggedIn, true);
+  assert.equal(result.account.avatar, "https://qn-sx.yuketang.cn/web.png");
+});
+
+test("v3 失效时不能拿宽松网页资料接口误判已登录", async () => {
+  const ctx = makeCtx(fullRoutes({
+    "/api/v3/user/basic-info": { code: 50000, msg: "UNAUTHENTICATED", data: "" },
+    "/api/web_lesson/user_info/": { data: { user_id: 10001, avatar: "https://qn-sx.yuketang.cn/old.png" } },
+  }));
+  assert.deepEqual(await checkLogin(ctx), { loggedIn: false });
+  assert.ok(!ctx.calls.some(c => c.url.includes('/user/profile') || c.url.includes('/user_info/')));
+});
+
+test("忽略其他账号或接口失败响应中的头像", async () => {
+  const ctx = makeCtx(fullRoutes({
+    "/api/v3/user/basic-info": { code: 0, data: { ...BASIC.data, avatar: "https://qn-sx.yuketang.cn/current.png" } },
+    "/mobile-app/api/user/profile": { code: 0, data: { basic_profile: { school_number: "other-student", avatar: "https://qn-sx.yuketang.cn/other.png" } } },
+    "/api/web_lesson/user_info/": { data: { user_id: 10002, avatar: "https://qn-sx.yuketang.cn/other.png" } },
+  }));
+  assert.equal((await checkLogin(ctx)).account.avatar, "https://qn-sx.yuketang.cn/current.png");
+  const failed = makeCtx(fullRoutes({
+    "/mobile-app/api/user/profile": { code: 90011, data: { basic_profile: { avatar: "https://qn-sx.yuketang.cn/stale.png" } } },
+  }));
+  assert.equal((await checkLogin(failed)).account.avatar, "");
+});
+
+test("重新获取账号资料时使用新账号的头像，不复用上次头像", async () => {
+  let id = 10001;
+  const ctx = makeCtx(fullRoutes({
+    "/api/v3/user/basic-info": () => response(200, JSON.stringify({ code: 0, data: { id, name: `用户${id}` } })),
+    "/mobile-app/api/user/profile": () => response(200, JSON.stringify({ code: 0, data: { id, basic_profile: { avatar: `https://qn-sx.yuketang.cn/${id}.png` } } })),
+  }));
+  assert.equal((await checkLogin(ctx)).account.avatar, "https://qn-sx.yuketang.cn/10001.png");
+  id = 10002;
+  const next = await checkLogin(ctx);
+  assert.equal(next.account.id, "10002");
+  assert.equal(next.account.avatar, "https://qn-sx.yuketang.cn/10002.png");
+});
+
+test("头像 URL 支持 HTTPS、协议相对地址和站内地址，拒绝无效值", () => {
+  assert.equal(normalizeAvatarUrl(' http://thirdwx.qlogo.cn/person/96?x=1 '), 'https://thirdwx.qlogo.cn/person/96?x=1');
+  assert.equal(normalizeAvatarUrl('//qn-sx.yuketang.cn/a.png'), 'https://qn-sx.yuketang.cn/a.png');
+  assert.equal(normalizeAvatarUrl('/images/avatar.jpg'), '/images/avatar.jpg');
+  for (const value of [null, {}, 42, '', 'null', 'javascript:alert(1)', 'file:///a.png', 'https://u:password@example.com/a.png', '/\\evil.example/a']) {
+    assert.equal(normalizeAvatarUrl(value), '');
+  }
+});
+
 test("sync：当前学期优先，同时保留往期公告，不拉往期作业考试", async () => {
   const ctx = makeCtx(fullRoutes());
   const result = await sync(ctx);
@@ -125,7 +221,8 @@ test("sync：当前学期优先，同时保留往期公告，不拉往期作业�
   assert.match(hw.summary, /作业 · 绪论 · 已答 3\/10/);
 
   assert.equal(byId["homework:101:2"].done, true);
-  assert.ok(!ctx.calls.some((c) => c.url.includes("leaf_info/101/2/")));
+  assert.ok(ctx.calls.some((c) => c.url.includes("leaf_info/101/2/")));
+  assert.equal(byId["homework:101:2"].dueAt, 1800000000000);
   assert.equal(byId["homework:101:3"], undefined);
   assert.equal(byId["homework:101:4"], undefined);
 
@@ -150,7 +247,7 @@ test("sync：截止时间缓存住，第二次同步不再查 leaf_info", async 
   const ctx = makeCtx(fullRoutes());
   await sync(ctx);
   const first = ctx.calls.filter((c) => c.url.includes("leaf_info")).length;
-  assert.equal(first, 1);
+  assert.equal(first, 2);
   ctx.calls.length = 0;
   await sync(ctx);
   assert.equal(ctx.calls.filter((c) => c.url.includes("leaf_info")).length, 0);
@@ -181,9 +278,167 @@ test("sync：设置关掉的类型不拉，隐藏已完成生效", async () => {
     settings: { syncExam: false, syncAnnouncement: false, hideFinished: true },
   });
   const result = await sync(ctx);
-  assert.ok(!ctx.calls.some((c) => c.url.includes("/logs/learn/")));
+  assert.ok(!ctx.calls.some((c) => c.url.includes("/v/exam/cover")));
   assert.ok(!ctx.calls.some((c) => c.url.includes("announcements")));
   assert.deepEqual(result.items.map((it) => it.id), ["homework:101:1"]);
+});
+
+// Redacted shapes from the student activity, score and leaf-detail responses.
+const CARDS = {
+  type: 2, id: 8001, courseware_id: "3001", title: "新学期学生手册",
+  create_time: NOW - 60000, end: null, count: 28,
+  view: { depth: 3, done: false }, has_mooc: false,
+};
+const CARDS_LEAF = {
+  id: 71, leaf_type: 7, publish_status: 2, schedule: "未完成",
+  leaf_level_title: CARDS.title, leaf_chapter_title: "未分类教学活动",
+  advance_release_time: "2026-09-29 11:59:00", is_expired: null,
+};
+function cardsRoutes({ activity = CARDS, leaf = CARDS_LEAF, detail = {} } = {}) {
+  const routes = fullRoutes();
+  return {
+    ...routes,
+    "/v2/api/web/logs/learn/101": { data: { activities: [...routes["/v2/api/web/logs/learn/101"].data.activities, activity] } },
+    "/c27/online_courseware/schedule/score_detail/single/9001/0/": {
+      data: { leaf_level_infos: [...routes["/c27/online_courseware/schedule/score_detail/single/9001/0/"].data.leaf_level_infos, leaf] },
+    },
+    "/mooc-api/v1/lms/learn/leaf_info/101/71/": { data: {
+      leaf_type: 7, content_info: { leaf_type_id: 3001, status: "post" },
+      score_deadline: 0, class_end_time: NOW + 100000000,
+      ...detail,
+    } },
+  };
+}
+
+test("课件：活动和章节合并为一项作业，保留发布时间、阅读进度，不借用结课时间", async () => {
+  const ctx = makeCtx(cardsRoutes());
+  const { items } = await sync(ctx);
+  const cards = items.filter(x => x.category === "课件");
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].id, "courseware:101:3001");
+  assert.equal(cards[0].type, "homework");
+  assert.equal(cards[0].title, CARDS.title);
+  assert.equal(cards[0].done, false);
+  assert.equal(cards[0].dueAt, null);
+  assert.equal(cards[0].publishAt, CARDS.create_time);
+  assert.match(cards[0].summary, /已阅读 3\/28 页.*待阅读.*未设截止时间/);
+  const info = ctx.calls.find(c => c.url.includes('leaf_info/101/71/'));
+  assert.equal(info.headers['classroom-id'], '101');
+  assert.equal(info.headers['university-id'], '0');
+  assert.ok(!items.some(x => x.id.includes('555')), "课堂结束记录不算预习作业");
+  for (const path of ['/logs/learn/101', '/sku_list/', '/score_detail/']) {
+    const calls = ctx.calls.filter(c => c.url.includes(path) && !c.url.includes('/102/'));
+    assert.equal(calls.length, 1, `${path} 在一个同步内共享请求`);
+  }
+});
+
+test("课件：再次同步保持 ID，阅读完成状态重新读取，叶子元数据使用缓存", async () => {
+  let done = false;
+  const routes = cardsRoutes();
+  routes['/v2/api/web/logs/learn/101'] = () => response(200, JSON.stringify({ data: {
+    activities: [{ ...CARDS, view: { depth: done ? 28 : 3, done } }],
+  } }));
+  const ctx = makeCtx(routes);
+  const first = (await sync(ctx)).items.find(x => x.category === '课件');
+  done = true;
+  ctx.calls.length = 0;
+  const second = (await sync(ctx)).items.find(x => x.category === '课件');
+  assert.equal(first.id, second.id);
+  assert.equal(second.done, true);
+  assert.match(second.summary, /已阅读 28\/28 页.*已读完/);
+  assert.ok(ctx.calls.some(c => c.url.includes('/logs/learn/101')));
+  assert.ok(!ctx.calls.some(c => c.url.includes('leaf_info/101/71/')));
+});
+
+test("课件：没有 SKU 的课也能同步自学课件", async () => {
+  const routes = cardsRoutes();
+  routes['/c27/online_courseware/course/classroom/101/0/sku_list/'] = { data: { data_list: [] } };
+  const ctx = makeCtx(routes);
+  const result = await sync(ctx);
+  assert.equal(result.items.find(x => x.id === 'courseware:101:3001').done, false);
+  assert.equal(result.message, undefined);
+  assert.ok(!ctx.calls.some(c => c.url.includes('/score_detail/')));
+});
+
+test("课件：成绩接口失败仍保留活动课件，活动接口失败仍保留章节课件", async () => {
+  for (const path of ['/c27/online_courseware/schedule/score_detail/single/9001/0/', '/v2/api/web/logs/learn/101']) {
+    const routes = cardsRoutes();
+    routes[path] = () => response(503, 'unavailable');
+    const result = await sync(makeCtx(routes));
+    assert.ok(result.items.some(x => x.id === 'courseware:101:3001'));
+    assert.ok(result.items.some(x => x.id === 'announcement:101:31'));
+    assert.match(result.message, /没取到/);
+  }
+});
+
+test("课件：只同步已发布叶子，忽略课堂、视频和未发布资源", async () => {
+  const routes = cardsRoutes();
+  routes['/v2/api/web/logs/learn/101'] = { data: { activities: [{ type: 14, courseware_id: '555', is_finished: true }] } };
+  routes['/c27/online_courseware/schedule/score_detail/single/9001/0/'].data.leaf_level_infos.push(
+    { ...CARDS_LEAF, id: 72, publish_status: 0 },
+    { ...CARDS_LEAF, id: 73, leaf_type: 8, lesson_id: '555', evaluation_id: 17 },
+    { ...CARDS_LEAF, id: 74, leaf_type: 0 },
+    { ...CARDS_LEAF, id: 75, leaf_type: 3 },
+    { ...CARDS_LEAF, id: 76, leaf_type: 14, schedule: 1, leaf_level_title: '章节课件' },
+  );
+  routes['/mooc-api/v1/lms/learn/leaf_info/101/76/'] = { data: { content_info: { leaf_type_id: 3002 }, score_deadline: NOW + 3600000 } };
+  const ctx = makeCtx(routes);
+  const result = await sync(ctx);
+  const cards = result.items.filter(x => x.category === '课件');
+  assert.deepEqual(cards.map(x => x.id).sort(), ['courseware:101:3001', 'courseware:101:3002']);
+  assert.equal(cards.find(x => x.id.endsWith('3002')).done, true);
+  assert.equal(cards.find(x => x.id.endsWith('3002')).dueAt, NOW + 3600000);
+  assert.ok(!ctx.calls.some(c => /leaf_info\/101\/(72|73|74|75)\//.test(c.url)));
+});
+
+test("课件：两份同名资源不合并，同一资源的重复叶子只出现一次", async () => {
+  const routes = cardsRoutes();
+  routes['/v2/api/web/logs/learn/101'].data.activities.push({ ...CARDS, courseware_id: '3002', id: 8002 });
+  routes['/c27/online_courseware/schedule/score_detail/single/9001/0/'].data.leaf_level_infos.push({ ...CARDS_LEAF, id: 72 });
+  routes['/mooc-api/v1/lms/learn/leaf_info/101/72/'] = routes['/mooc-api/v1/lms/learn/leaf_info/101/71/'];
+  const result = await sync(makeCtx(routes));
+  assert.deepEqual(result.items.filter(x => x.category === '课件').map(x => x.id).sort(), ['courseware:101:3001', 'courseware:101:3002']);
+});
+
+test("课件：未完成和已完成使用官方阅读状态，隐藏已完成沿用已有偏好", async () => {
+  const routes = cardsRoutes({ activity: { ...CARDS, view: { depth: 28, done: true } }, leaf: { ...CARDS_LEAF, schedule: '已完成' } });
+  assert.equal((await sync(makeCtx(routes))).items.find(x => x.category === '课件').done, true);
+  assert.ok(!(await sync(makeCtx(routes, { settings: { hideFinished: true } }))).items.some(x => x.category === '课件'));
+  // Progress depth is not a completion flag, and the fresh activity wins over stale score data.
+  const notDone = cardsRoutes({ activity: { ...CARDS, view: { depth: 28, done: false } }, leaf: { ...CARDS_LEAF, schedule: '已完成' } });
+  assert.equal((await sync(makeCtx(notDone))).items.find(x => x.category === '课件').done, false);
+});
+
+test("课件：只有明确截止才提醒，活动和详情均不使用结课时间", async () => {
+  const routes = cardsRoutes({ activity: { ...CARDS, end: (NOW + 3600000) / 1000 } });
+  assert.equal((await sync(makeCtx(routes))).items.find(x => x.category === '课件').dueAt, NOW + 3600000);
+});
+
+test("课件：关闭作业同步不读取课件和成绩，关闭考试仍读取课件但不查试卷状态", async () => {
+  const allOff = makeCtx(cardsRoutes(), { settings: { syncHomework: false, syncExam: false } });
+  const result = await sync(allOff);
+  assert.ok(!result.items.some(x => x.type === 'homework'));
+  assert.ok(!allOff.calls.some(c => /logs\/learn|sku_list|score_detail|leaf_info/.test(c.url)));
+  const examOff = makeCtx(cardsRoutes(), { settings: { syncExam: false } });
+  assert.ok((await sync(examOff)).items.some(x => x.category === '课件'));
+  assert.ok(!examOff.calls.some(c => c.url.includes('/v/exam/cover')));
+});
+
+test("课件：章节详情登录失效仍返回 loginRequired", async () => {
+  const routes = cardsRoutes();
+  routes['/mooc-api/v1/lms/learn/leaf_info/101/71/'] = () => response(401, '');
+  assert.deepEqual(await sync(makeCtx(routes)), { loginRequired: true });
+});
+
+test("课件：元数据失败不丢掉活动，也不缓存无效资源 ID，下次可重试", async () => {
+  const routes = cardsRoutes({ detail: { content_info: {} } });
+  const ctx = makeCtx(routes);
+  const result = await sync(ctx);
+  assert.ok(result.items.some(x => x.id === 'courseware:101:3001'));
+  assert.match(result.message, /没取到/);
+  assert.equal(ctx.store.cache.courseware['101:71'], undefined);
+  routes['/mooc-api/v1/lms/learn/leaf_info/101/71/'] = { data: { content_info: { leaf_type_id: 3001 }, score_deadline: 0 } };
+  assert.equal((await sync(ctx)).message, undefined);
 });
 
 test("sync：站点设置只认 *.yuketang.cn，其余回落到长江雨课堂", async () => {
@@ -209,4 +464,19 @@ test('不支持内容操作：已读接口已从组件移除', async () => {
   const ctx = makeCtx({});
   ctx.action = {type:'markRead',itemId:'announcement:101:31'};
   await assert.rejects(performItemAction(ctx), /不支持/);
+});
+
+
+test("截止时间：已完成作业仍读取截止时间，考试可从封面补齐", async () => {
+ const ctx=makeCtx(fullRoutes({
+  "/mooc-api/v1/lms/learn/leaf_info/101/2/": {data:{score_deadline:NOW-1000}},
+  "/v2/api/web/logs/learn/101": {data:{activities:[{type:5,courseware_id:777,title:"已结束考试"}]}},
+  "/v/exam/cover": {data:{result:{status:4},start_time:NOW-10000,deadline:NOW-1000}},
+ }), {state:{cache:{exams:{"101:777":{done:true,at:NOW,startAt:NOW-10000}}}}});
+ const result=await sync(ctx),hw=result.items.find(x=>x.id==='homework:101:2'),exam=result.items.find(x=>x.id==='exam:101:777');
+ assert.equal(hw.done,true);assert.equal(hw.dueAt,NOW-1000);
+ assert.equal(exam.done,true);assert.equal(exam.dueAt,NOW-1000);
+ assert.ok(ctx.calls.some(x=>x.url.includes('/v/exam/cover')));
+ ctx.calls.length=0;await sync(ctx);
+ assert.ok(!ctx.calls.some(x=>x.url.includes('/v/exam/cover')));
 });

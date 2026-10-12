@@ -1,4 +1,5 @@
 import {sdk,esc,icon,iconButton,sheet,selectField,bindAll,toast,friendlyTime,pickerSheet} from './shared.js';
+import {normalizeAvatarUrl} from '../main.js';
 const app=document.getElementById('app'),clone=v=>JSON.parse(JSON.stringify(v));
 let state=sdk.state,busy='',panel='',first=true,refreshTimer=0,downloads=null;
 const fileSize=b=>b>=1048576?`${(b/1048576).toFixed(1)} MB`:`${Math.max(1,Math.round(b/1024))} KB`;
@@ -51,8 +52,8 @@ function selectFields(){return state.manifest.extension.settings.filter(x=>x.key
 function render(){
  const d=state.data,h=d.host,signed=d.loginState==='logged_in',expired=d.loginState==='expired';
  const name=d.account?.name||'';
- const avatarUrl=d.account?.avatar||'';
- const avatar=avatarUrl?`<img src="${esc(avatarUrl)}" alt="" loading="lazy" onerror="this.replaceWith(document.createTextNode('${esc(signed&&name?[...name][0]:'')}'))">`
+ const avatarUrl=signed?normalizeAvatarUrl(d.account?.avatar):'';
+ const avatar=avatarUrl?`<img src="${esc(avatarUrl)}" alt="" loading="eager">`
   :(signed&&name?esc([...name][0]):icon(signed?'user':'lock'));
  const statusLine=!signed?`${icon('info')}<span>登录后，课简会按这里的设置同步和提醒</span>`
   :d.lastError?`${icon('alert')}<span>${esc(d.lastError)}</span>`
@@ -60,7 +61,7 @@ function render(){
   :`${icon('check')}<span>${d.lastSyncAt?`上次同步：${esc(friendlyTime(d.lastSyncAt,tz(),state.context?.nowMillis||Date.now()))}`:'已连接，可以立即同步'}</span>`;
  const keepY=window.scrollY;
  app.innerHTML=`<header class="bar"><button class="tonal-btn" id="back" aria-label="返回">${icon('back')}</button><h1>雨课堂设置</h1></header>
- <div class="${first?'stagger':''}" style="display:contents">
+ <div style="display:contents">
  <section class="account-card${signed?'':' off'}" style="--i:0"><span class="avatar">${avatar}</span><span class="row-copy"><strong>${esc(signed?name||'已连接雨课堂':expired?'登录已过期':'还未登录')}</strong><small>${esc(signed?[d.account?.school,siteName()].filter(Boolean).join(' · '):siteName()+' · 登录后开始同步')}</small></span>${signed?'':`<button class="primary small" id="login">${expired?'重新登录':'登录'}</button>`}</section>
  <div class="sync-card" style="--i:1"><button class="primary" id="feed">${icon(signed?'calendar':'link')}${signed?'打开我的课堂':'登录并连接'}</button>${signed?`<button class="tonal-btn${busy==='sync'?' spin':''}" id="sync" aria-label="立即同步"${busy==='sync'?' disabled':''}>${icon('sync')}</button>`:''}</div>
  <div class="sync-status${signed&&d.lastError?' err':''}" style="--i:2">${statusLine}</div>
@@ -71,7 +72,7 @@ function render(){
  ${nav('schedule','写进课表事务',h.addToSchedule?'已开启 · 按日期规则加入课表':'已关闭','list')}
  </div>
  <p class="section-label" style="--i:5">同步</p>
- <div class="group" style="--i:6">${nav('content','同步内容','作业、考试、公告与往期范围','book')}${nav('downloads','已下载的附件',downloads==null?'正在读取…':downloads.length?`${downloads.length} 个文件 · ${fileSize(downloads.reduce((t,x)=>t+(x.size||0),0))}`:'还没有下载过附件','folder')}</div>
+ <div class="group" style="--i:6">${nav('content','同步内容','作业、课件、考试、公告与往期范围','book')}${nav('downloads','已下载的附件',downloads==null?'正在读取…':downloads.length?`${downloads.length} 个文件 · ${fileSize(downloads.reduce((t,x)=>t+(x.size||0),0))}`:'还没有下载过附件','folder')}</div>
  <p class="section-label" style="--i:7">账号与组件</p>
  <div class="group" style="--i:8">
  <button class="nav-row" id="site-row">${icon('globe')}<span class="row-copy"><span>雨课堂站点</span><small>${esc(siteName())} · 换站点后需要重新登录</small></span><span class="chevron">${icon('next')}</span></button>
@@ -81,6 +82,10 @@ function render(){
  </div>
  <p class="footnote center" style="--i:9">${esc(state.manifest.name)} · v${esc(state.manifest.version)}</p>
  </div>`;
+ const avatarImage=app.querySelector('.account-card .avatar img');
+ if(avatarImage)avatarImage.onerror=()=>{
+  avatarImage.replaceWith(document.createTextNode(name?[...name][0]:''));
+ };
  if(keepY)window.scrollTo(0,keepY);
  document.getElementById('back').onclick=()=>sdk.request('ui.close');
  document.getElementById('login')?.addEventListener('click',()=>action('ui.login'));
@@ -94,13 +99,13 @@ function render(){
  first=false;
 }
 function openPanel(key){
- panel=key;const d=state.data,h=d.host;
+ const previousPanel=panel;panel=key;const d=state.data,h=d.host;
  let title='',body='',binds=[];
  if(key==='reminder'){
   title='通知与同步';
   const due=selectField({id:'p-due',label:'截止前提醒',description:'按内容原始截止时间提前提醒一次',value:h.dueReminderHours,options:[[0,'不提醒'],[1,'提前 1 小时'],[3,'提前 3 小时'],[6,'提前 6 小时'],[12,'提前 12 小时'],[24,'提前 1 天'],[48,'提前 2 天']].map(([v,l])=>({value:v,label:l})),onPick:v=>action('host.update',{...state.data.host,dueReminderHours:Number(v)})});
   const interval=selectField({id:'p-interval',label:'后台同步间隔',description:'手机系统可能推迟后台同步',value:h.syncIntervalMinutes??'',options:[[null,'组件默认（1 小时）'],[30,'30 分钟'],[60,'1 小时'],[120,'2 小时'],[240,'4 小时'],[480,'8 小时']].map(([v,l])=>({value:v??'',label:l})),onPick:v=>action('host.update',{...state.data.host,syncIntervalMinutes:v===''?null:Number(v)})});
-  body=`<div class="group">${row('新内容通知','老师发布作业、考试或公告时提醒',toggle('notifyNew',h.notifyNew,'新内容通知'),'bell')}${row('自动忽略逾期任务','默认关闭；开启后从小组件和提醒中收起逾期任务，可在已忽略列表恢复',toggle('ignoreOverdue',h.ignoreOverdue===true,'自动忽略逾期任务'),'inbox')}</div><p class="section-label">提醒时间</p><div class="group">${due.html}</div><p class="section-label">同步</p><div class="group">${interval.html}</div>`;
+  body=`<div class="group">${row('新内容通知','老师发布作业、考试或公告时提醒',toggle('notifyNew',h.notifyNew,'新内容通知'),'bell')}${row('自动忽略逾期任务','开启后隐藏已截止的作业和考试（含已完成），并停止提醒；手动恢复的内容除外',toggle('ignoreOverdue',h.ignoreOverdue===true,'自动忽略逾期任务'),'inbox')}</div><p class="section-label">提醒时间</p><div class="group">${due.html}</div><p class="section-label">同步</p><div class="group">${interval.html}</div>`;
   binds.push(due,interval);
  }
  else if(key==='content'){title='同步内容';body=`<div class="group">${fields()}</div>`;binds.push(...selectFields());}
@@ -116,7 +121,7 @@ function openPanel(key){
    }
    body+=`<p class="section-label">保留范围</p><div class="group">${row('保留已完成的任务','',toggle(`${key}.includeCompleted`,config.includeCompleted,'保留已完成的任务'),'check')}${row('保留已读公告','',toggle(`${key}.includeReadNotices`,config.includeReadNotices,'保留已读公告'),'megaphone')}${inputRow('历史天数','只显示最近这么多天；0 表示全部',`<input aria-label="历史天数" type="number" inputmode="numeric" min="0" max="36500" data-host="${key}.historyDays" value="${config.historyDays}">`,'clock')}</div>`;
    if(!feed){
-    body+=`<p class="section-label">时间与外观</p><div class="group">${inputRow('默认开始时间','内容没有时段时使用',`<input aria-label="默认开始时间" type="time" data-host="schedule.defaultStartTime" value="${esc(config.defaultStartTime)}">`,'clock')}${inputRow('事务时长','分钟；不会额外创建闹钟',`<input aria-label="事务时长" type="number" inputmode="numeric" min="1" max="1440" data-host="schedule.durationMinutes" value="${config.durationMinutes}">`,'calendar')}${row('标题前加类型','例如「作业 · 第三章练习」',toggle('schedule.showTypeInTitle',config.showTypeInTitle,'标题前加类型'),'edit')}${row('使用类型颜色','作业、考试、公告用不同颜色',toggle('schedule.useTypeColors',config.useTypeColors,'使用类型颜色'),'info')}</div>`;
+    body+=`<p class="section-label">时间与外观</p><div class="group">${inputRow('默认开始时间','选择固定时间模式时使用',`<input aria-label="默认开始时间" type="time" data-host="schedule.defaultStartTime" value="${esc(config.defaultStartTime)}">`,'clock')}${inputRow('事务时长','分钟；不会额外创建闹钟',`<input aria-label="事务时长" type="number" inputmode="numeric" min="1" max="1440" data-host="schedule.durationMinutes" value="${config.durationMinutes}">`,'calendar')}${row('标题前加类型','例如「作业 · 第三章练习」',toggle('schedule.showTypeInTitle',config.showTypeInTitle,'标题前加类型'),'edit')}${row('使用类型颜色','作业、考试、公告用不同颜色',toggle('schedule.useTypeColors',config.useTypeColors,'使用类型颜色'),'info')}</div>`;
     body+='<p class="section-label">按类型细调</p>'+`<div class="group">${types().map(t=>nav('rule:'+t.id,esc(t.label),ruleSummary(t.id),typeIcons[t.id]||'calendar')).join('')}</div>`;
    }
   }
@@ -147,7 +152,7 @@ function openPanel(key){
   root.querySelectorAll('[data-rule]').forEach(i=>i.onchange=()=>ruleChange(i.dataset.rule,i.dataset.ruleKey,i.type==='number'?Number(i.value):i.value));
   root.querySelectorAll('[data-open]').forEach(b=>b.onclick=async()=>{try{await sdk.request('media.openSaved',{id:b.dataset.open});}catch(e){toast(e.message||'打开失败','err');loadDownloads();}});
   root.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{const row=b.closest('.dl-row');row?.classList.add('leaving');try{await sdk.request('media.delete',{id:b.dataset.del});toast('已删除');}catch(e){toast(e.message||'删除失败','err');}setTimeout(loadDownloads,180);});
- });
+ },{back:previousPanel.startsWith('rule:')&&key==='schedule',onClose:()=>{panel='';}});
 }
 function confirmSheet(title,text,confirmLabel,run){
  panel='';

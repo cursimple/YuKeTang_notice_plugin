@@ -21,3 +21,11 @@ test('upcoming tasks take priority over archived deadlines',()=>{
  const data={manifest,items:[item('old',{dueAt:10}),item('later',{dueAt:300}),item('soon',{dueAt:200}),item('undated')]};
  assert.deepEqual(widgetTasks(data,100).map(x=>x.id),['soon','later','undated','old']);
 });
+test('courseware uses assignment semantics, keeps undated tasks and hides completed reading',()=>{
+ const data={manifest,host:{ignoreOverdue:true},items:[
+  item('courseware:101:3001',{category:'课件',dueAt:null,publishAt:10}),
+  item('courseware:101:3002',{category:'课件',done:true,dueAt:null}),
+  item('due-courseware',{category:'课件',dueAt:200}),
+ ]};
+ assert.deepEqual(widgetTasks(data,100).map(x=>x.id),['due-courseware','courseware:101:3001']);
+});

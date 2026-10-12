@@ -1,12 +1,27 @@
-import {anchorOf,visibleFeedItems,itemDayKey,filterFeedItems,pendingCount,stateOfItem,statusCounts,hasTaskItems,isPendingItem,isNoticeItem,isIgnoredItem,ignoredFeedItems} from './feed-model.js';
+import {rainTools} from './diagnostics.js';
+import {anchorOf,visibleFeedItems,itemDayKey,filterFeedItems,pendingCount,stateOfItem,statusCounts,hasTaskItems,isPendingItem,isNoticeItem,isIgnoredItem,ignoredFeedItems,snapshotClock,nextTaskDeadline} from './feed-model.js';
 import {sdk,esc,icon,iconButton,sheet,segmented,bindSegmented,bannerHtml,openLightbox,toast,friendlyTime} from './shared.js';
+import {COURSEWARE_PROGRESS_HINT,coursewareOfficialUrl} from './courseware-api.js';
 const app=document.getElementById('app');
 let snapshot=sdk.state,data=snapshot.data,month=null,selected='',type='',status='',view=data.host?.feed?.defaultView==='list'?'list':'month',syncing=false,error='';
-let pageTimer=0,bootTimer=0,paneAnim='',pendingDelta=0;
-const bootAt=performance.now();
+let pageTimer=0,paneAnim='',pendingDelta=0;
 const WEEK=['日','一','二','三','四','五','六'];
 const manifest=()=>snapshot.manifest,tz=()=>snapshot.context?.timeZone||'Asia/Shanghai';
-const now=()=>snapshot.context?.nowMillis||Date.now();
+let readClock=snapshotClock(snapshot.context?.nowMillis),expiryTimer=0;
+const now=()=>readClock();
+let lastExpiryCheck=now();
+function scheduleExpiry(){
+ clearTimeout(expiryTimer);lastExpiryCheck=now();
+ const deadline=nextTaskDeadline(data,lastExpiryCheck,manifest());if(deadline==null)return;
+ expiryTimer=setTimeout(refreshAfterTime,Math.min(2147483647,Math.max(1,deadline-now()+10)));
+}
+function refreshAfterTime(){
+ const at=now(),deadline=nextTaskDeadline(data,lastExpiryCheck,manifest());
+ if(at<lastExpiryCheck||(deadline!=null&&deadline<=at)){const y=window.scrollY;render();window.scrollTo(0,y);}
+ scheduleExpiry();
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshAfterTime();});
+window.addEventListener('pagehide',()=>clearTimeout(expiryTimer));
 const today=()=>itemDayKey(now(),tz());
 const types=()=>manifest().extension.feedTypes||[];
 const anchor=x=>anchorOf(x,data.host?.feed?.dateSource,manifest());
@@ -27,7 +42,7 @@ const stateOf=x=>stateOfItem(x,manifest());
 const overdue=x=>stateOf(x)==='pending'&&x.dueAt&&x.dueAt<now();
 /** Unread and read notices have explicit status labels. */
 function stateTag(x){const s=stateOf(x);if(overdue(x))return ['pending','已逾期'];return {pending:['pending','待完成'],done:['done','已完成'],notice:['notice','未读'],old:['old','往期'],read:['read','已读']}[s];}
-function typeIcon(x){const map={homework:'edit',exam:'clock',announcement:'megaphone',notice:'info'};if(map[x.type])return map[x.type];return typeSpec(x)?.kind==='notice'?'bell':'file';}
+function typeIcon(x){if(x.category==='课件')return 'file';const map={homework:'edit',exam:'clock',announcement:'megaphone',notice:'info'};if(map[x.type])return map[x.type];return typeSpec(x)?.kind==='notice'?'bell':'file';}
 const tile=x=>`<span class="type-tile ${stateOf(x)}">${icon(typeIcon(x))}</span>`;
 function remain(ms){const d=ms-now(),a=Math.abs(d),h=a/3600000;const t=h<1?`${Math.max(1,Math.round(a/60000))} 分钟`:h<48?`${Math.round(h)} 小时`:`${Math.round(h/24)} 天`;return d>=0?`还剩 ${t}`:`已过 ${t}`;}
 function ensureDate(){if(!month){const [y,m]=parts(today());month=new Date(y,m-1,1);selected=today();}}
@@ -37,43 +52,18 @@ function header(signed){
  const title=esc(manifest().extension.title||'雨课堂');
  let sub;
  if(!signed)sub=`<span>${data.loginState==='expired'?'登录已过期':'未连接账号'}</span>`;
- else{const synced=data.lastSyncAt?`${when(data.lastSyncAt)} 同步`:'尚未同步';sub=`<i class="live${syncing?' busy':''}"></i><span>${esc(data.account?.name||'已连接')} · ${syncing?'正在同步…':synced}</span>`;}
- return `<header class="top feed-header"><div class="title-block"><h1>${title}</h1><div class="subline">${sub}</div></div>${signed?iconButton('sync','sync','同步课堂'):''}${iconButton('settings','settings','组件设置')}${iconButton('info','about','关于组件')}</header>`;
+ else{const synced=data.lastSyncAt?`${when(data.lastSyncAt)} 同步`:'尚未同步',loading=syncing||(!data.lastSyncAt&&!data.lastError);sub=`<i class="live${loading?' busy':''}"></i><span>${esc(data.account?.name||'已连接')} · ${loading?'正在同步…':synced}</span>`;}
+ return `<header class="top feed-header"><div class="title-block"><h1>${title}</h1><div class="subline">${sub}</div></div>${signed?iconButton('sync','sync','同步课堂'):''}${iconButton('settings','settings','组件设置')}<button class="secondary toolbar-label" id="about" aria-label="关于组件">关于</button></header>`;
 }
 function bindHeader(){
  const b=document.getElementById('settings');if(b)b.onclick=()=>request('ui.settings');
  const s=document.getElementById('sync');
- if(s){s.className='icon-btn'+(syncing?' syncing':'');s.disabled=syncing;s.onclick=async()=>{syncing=true;error='';render();const r=await request('sync');syncing=false;render();if(r!==undefined&&!error)toast(r?.count!=null?`同步完成 · ${r.count} 条内容`:'同步完成');};}
+ if(s){s.className='icon-btn'+(syncing?' syncing':'');s.disabled=syncing;s.setAttribute('aria-busy',String(syncing));s.onclick=async()=>{syncing=true;error='';render();const r=await request('sync');syncing=false;render();if(r!==undefined&&!error)toast(r?.count!=null?`同步完成 · ${r.count} 条内容`:'同步完成');};}
  const about=document.getElementById('about');if(about)about.onclick=openAbout;
 }
 
-function aboutBody(){
- const m=manifest(),repo=m.homepage||'';
- return `<div class="group about-panel"><div class="row"><span class="type-tile">${icon('info')}</span><span class="row-copy"><strong>${esc(m.name||'组件')}</strong><small>${esc(m.publisher||'')} · ${esc(m.extension?.title||'')}</small></span></div><button class="nav-row" id="about-version"><span class="row-copy"><span>版本</span><small>v${esc(m.version||'-')}</small></span>${icon('next')}</button>${repo?`<button class="nav-row" id="about-repo"><span class="row-copy"><span>开源仓库</span><small>${esc(repo)}</small></span>${icon('external')}</button>`:''}</div>`;
-}
-
-function openAbout(){
- sheet('关于组件',aboutBody(),root=>{
-  root.querySelector('#about-repo')?.addEventListener('click',()=>sdk.request('ui.openExternal',{url:manifest().homepage}));
-  let taps=0,last=0;
-  root.querySelector('#about-version')?.addEventListener('click',()=>{
-   const nowMs=Date.now();if(nowMs-last>3000)taps=0;last=nowMs;
-   if(++taps>=7){taps=0;openHiddenTools();}
-  });
- });
-}
-
-function openHiddenTools(){
- sheet('诊断工具',`<div class="group"><div class="row"><span class="row-copy"><strong>雨课堂组件诊断</strong><small>检查小组件渲染、同步状态和宿主日志</small></span></div><button class="nav-row" id="diag-refresh"><span class="row-copy"><span>刷新小组件</span><small>重新绘制桌面实例</small></span>${icon('sync')}</button><button class="nav-row" id="diag-sync"><span class="row-copy"><span>立即同步</span><small>调用雨课堂组件同步流程</small></span>${icon('refresh')}</button><button class="nav-row" id="diag-logs"><span class="row-copy"><span>查看调试日志</span><small>显示最近的组件运行日志</small></span>${icon('bug')}</button><button class="nav-row danger" id="diag-disable"><span class="row-copy"><span>关闭隐藏工具</span><small>关闭隐藏入口</small></span>${icon('lock')}</button></div><pre id="diag-log-output" hidden></pre>`,root=>{
-  root.querySelector('#diag-refresh').onclick=()=>sdk.request('debug.refreshWidget').then(()=>toast('已请求刷新小组件'));
-  root.querySelector('#diag-sync').onclick=()=>request('sync').then(()=>toast('同步完成'));
-  root.querySelector('#diag-logs').onclick=async()=>{
-   const out=root.querySelector('#diag-log-output');out.hidden=false;out.textContent='读取中…';
-   try{const rows=await sdk.request('debug.logs');out.textContent=(rows||[]).map(x=>`${new Date(x.time).toLocaleTimeString()} [${x.level}] ${x.event} ${x.message||''}`).join('\\n')||'暂无组件日志';}catch(e){out.textContent=e.message;}
-  };
-  root.querySelector('#diag-disable').onclick=()=>sdk.request('debug.advancedTools',{enabled:false}).then(()=>{toast('已关闭隐藏工具');document.querySelector('#sheet-close')?.click();});
- });
-}
+const tools=rainTools(()=>snapshot);
+function openAbout(){tools.openAbout();}
 const legend=()=>`<div class="legend" aria-label="颜色图例"><span><i class="dot pending"></i>待完成</span><span><i class="dot done"></i>已完成</span><span><i class="dot notice"></i>未读公告</span><span><i class="dot read"></i>已读 / 往期</span></div>`;
 const skeletonList=()=>`<div class="skeleton skeleton-line" style="width:96px"></div><div class="skeleton skeleton-block" style="min-height:196px"></div>`;
 const emptyState=(text,ic='inbox')=>`<div class="empty"><div class="orb">${icon(ic)}</div><p>${esc(text)}</p></div>`;
@@ -82,11 +72,11 @@ function loggedOut(){
  const expired=data.loginState==='expired';
  app.className='page';
  app.innerHTML=header(false)+`<div class="stagger" style="display:contents">`+
-  `<section class="welcome${expired?' expired':''}" style="--i:0"><div class="orb">${icon(expired?'alert':'book')}</div><h2>${expired?'登录已过期':'连接你的雨课堂'}</h2><p>${expired?'重新登录后，作业、考试和公告会继续同步和提醒。':'登录后，老师发布的作业、考试和公告由课简整理和提醒。'}</p><button class="primary" id="login">${icon(expired?'refresh':'link')}${expired?'重新登录':'登录雨课堂'}</button></section>`+
+  `<section class="welcome${expired?' expired':''}" style="--i:0"><div class="orb">${icon(expired?'alert':'book')}</div><h2>${expired?'登录已过期':'连接你的雨课堂'}</h2><p>${expired?'重新登录后，作业、课件、考试和公告会继续同步和提醒。':'登录后，老师发布的作业、课件、考试和公告由课简整理和提醒。'}</p><button class="primary" id="login">${icon(expired?'refresh':'link')}${expired?'重新登录':'登录雨课堂'}</button></section>`+
   `<p class="section-label" style="--i:1">登录后可以</p>`+
-  `<div class="group perks" style="--i:2"><div class="row">${icon('bell')}<div class="row-copy"><span>新内容提醒</span><small>老师发布作业、考试或公告时通知你</small></div></div><div class="row">${icon('clock')}<div class="row-copy"><span>截止前提醒</span><small>按你设定的时间，在截止前提醒一次</small></div></div><div class="row">${icon('calendar')}<div class="row-copy"><span>月历与课表</span><small>按日期整理成月历，也能写进课表事务</small></div></div></div>`+
+  `<div class="group perks" style="--i:2"><div class="row">${icon('bell')}<div class="row-copy"><span>新内容提醒</span><small>老师发布作业、课件、考试或公告时通知你</small></div></div><div class="row">${icon('clock')}<div class="row-copy"><span>截止前提醒</span><small>按你设定的时间，在截止前提醒一次</small></div></div><div class="row">${icon('calendar')}<div class="row-copy"><span>月历与课表</span><small>按日期整理成月历，也能写进课表事务</small></div></div></div>`+
   (error?bannerHtml(error,'err'):'')+
-  `<p class="footnote center" style="--i:3">支持手机号验证码与微信扫码 · 课简不保存你的密码</p></div>`;
+  `<p class="footnote center" style="--i:3">手机号验证码登录 · 课简不保存你的密码</p></div>`;
  document.getElementById('login').onclick=()=>request('ui.login');bindHeader();
 }
 
@@ -130,7 +120,7 @@ function monthPane(){
   cells+=`<button class="day${wd>4?' weekend':''}${k===today()?' today':''}${k===selected?' selected':''}${entries.length?' has':''}" data-day="${k}" aria-label="${m+1}月${d}日，${entries.length}项内容" aria-pressed="${k===selected}"><span class="num">${d}</span><span class="dots">${dots}</span></button>`;
  }
  const [ty,tm]=parts(today()),atToday=ty===y&&tm===m+1&&selected===today();
- return `<section class="calendar" aria-label="整月日历"><div class="cal-head"><h2>${y}年${m+1}月</h2><button class="today-chip" id="today"${atToday?' hidden':''}>回到今天</button>${iconButton('prev','back','上个月')}${iconButton('next','next','下个月')}</div>`+
+ return `<section class="calendar" aria-label="整月日历"><div class="cal-head"><h2>${y}年${m+1}月</h2><button class="today-chip" id="today"${atToday?' hidden':''}>回到今天</button>${iconButton('prev','prev','上个月')}${iconButton('next','next','下个月')}</div>`+
   `<div class="weekdays">${['一','二','三','四','五','六','日'].map((x,i)=>`<span class="weekday${i>4?' weekend':''}">${x}</span>`).join('')}</div><div class="days-view" id="days-view"><div class="days">${cells}</div></div>${legend()}</section>`+
   dayInline(by[selected]||[],selected,false);
 }
@@ -179,10 +169,9 @@ function dayInline(entries,k,swap){
 function listPane(available){
  const by=byDay(),keys=Object.keys(by).sort().reverse();
  const fresh=available.length===0&&!data.lastSyncAt;
- const warming=fresh&&performance.now()-bootAt<600&&!data.lastError;
- if(warming&&!bootTimer)bootTimer=setTimeout(()=>{bootTimer=0;render();},650);
+ const warming=fresh&&!data.lastError;
  let html;
- if(!keys.length)html=(syncing||warming)?skeletonList():emptyState(data.lastSyncAt?(type||status?'没有符合筛选条件的内容':'还没有课堂内容'):'还没有同步内容，点右上角同步试试',data.lastSyncAt?'inbox':'sync');
+ if(!keys.length)html=(syncing||warming)?skeletonList():emptyState(data.lastSyncAt?(type||status?'没有符合筛选条件的内容':'还没有课堂内容'):'同步未完成，点击右上角重试',data.lastSyncAt?'inbox':'sync');
  else{const t=today();let i=0;html=keys.map(k=>{const rel=relDay(k);return `<section class="list-day" style="--i:${Math.min(i++,8)}"><div class="list-heading${k<t?' past':''}">${dateLabel(k)} 周${weekdayOf(k)}${rel?` · ${rel}`:''}<small>${by[k].length} 项</small></div><div class="group">${by[k].map(x=>itemRow(x)).join('')}</div></section>`;}).join('');}
  return `<div class="list-scroll${paneAnim?'':' stagger'}">${html}</div>`;
 }
@@ -190,23 +179,24 @@ function listPane(available){
 function itemRow(x){
  const s=stateOf(x),[cls,text]=stateTag(x);
  const due=x.dueAt?`${s==='pending'&&x.dueAt-now()<86400000&&x.dueAt>now()?`<b>${esc(when(x.dueAt))} 截止</b>`:`截止 ${esc(when(x.dueAt))}`}`:(x.startAt?`开始 ${esc(when(x.startAt))}`:'');
- const meta=[esc(label(x)),esc(x.course||''),due].filter(Boolean).join(' · ');
- return `<button class="item-row${s==='done'||s==='read'?' is-done':''}${x.historical?' is-old':''}" data-item="${esc(x.id)}">${tile(x)}<span class="row-copy"><h3>${esc(x.title||label(x))}</h3><span class="meta">${meta}</span></span>${text?`<span class="pill ${cls}">${text}</span>`:''}</button>`;
+ const meta=[esc(label(x)),esc(x.course||'')].filter(Boolean).join(' · ');
+ return `<button class="item-row${s==='done'||s==='read'?' is-done':''}${x.historical?' is-old':''}" data-item="${esc(x.id)}">${tile(x)}<span class="row-copy"><h3>${esc(x.title||label(x))}</h3><span class="meta">${meta}</span></span>${text?`<span class="pill ${cls}">${text}</span>`:''}${due?`<span class="item-time">${due}</span>`:''}</button>`;
 }
 function bindItems(root){root?.querySelectorAll('[data-item]').forEach(b=>b.onclick=()=>{const item=data.items.find(x=>x.id===b.dataset.item);if(item)openItem(item);});}
-function pendingList(){return allItems().filter(x=>isPendingItem(x,manifest())).sort((a,b)=>(a.dueAt||anchor(a))-(b.dueAt||anchor(b)));}
+function pendingList(){return allItems().filter(x=>isPendingItem(x,manifest())).sort((a,b)=>((a.dueAt??a.startAt??Infinity)-(b.dueAt??b.startAt??Infinity))||anchor(a)-anchor(b));}
 function pendingCard(){
+ if(!data.lastSyncAt&&!allItems().length)return `<div class="pending-card"><span class="tile">${data.lastError?icon('sync'):'<span class="spinner"></span>'}</span><span class="row-copy"><span>${data.lastError?'课堂内容尚未同步':'正在同步课堂内容'}</span></span></div>`;
  const list=pendingList(),n=pendingCount(allItems(),manifest());
- if(!n)return `<button class="pending-card clear" data-pending><span class="tile">${icon('check')}</span><span class="row-copy"><span>作业和考试都完成了</span><small>有新内容发布时会提醒你</small></span><span class="chevron">${icon('next')}</span></button>`;
+ if(!n)return `<button class="pending-card clear" data-pending><span class="tile">${icon('check')}</span><span class="row-copy"><span>作业、课件和考试都完成了</span><small>有新内容发布时会提醒你</small></span><span class="chevron">${icon('next')}</span></button>`;
  const next=list.find(x=>x.dueAt&&x.dueAt>now());
  const late=list.filter(overdue).length;
- const sub=next?`最近：${esc(next.title||label(next))} · <span class="next-due">${esc(when(next.dueAt))}</span>`:late?`${late} 项已过截止时间`:'点开查看没做完的作业和考试';
+ const sub=next?`<span class="next-due">截止 ${esc(when(next.dueAt))}</span>`:late?`${late} 项已过截止时间`:'查看待完成的作业、课件和考试';
  return `<button class="pending-card" data-pending><span class="tile">${n>99?'99+':n}</span><span class="row-copy"><span>${n} 项待完成</span><small style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub}</small></span><span class="chevron">${icon('next')}</span></button>`;
 }
 
 const fileExt=n=>{const m=/\.([a-z0-9]{1,6})$/i.exec(n||'');return m?m[1].toUpperCase():'';};
 async function busyButton(b,run){if(b.disabled)return;const html=b.innerHTML;b.disabled=true;b.innerHTML=`<span class="spinner"></span>${b.textContent.trim()}`;try{await run();}finally{b.disabled=false;if(b.isConnected&&b.querySelector('.spinner'))b.innerHTML=html;}}
-function markDownloaded(btn,entry){btn.className='tonal small done';btn.innerHTML=`${icon('file')}打开`;btn.dataset.saved=entry.id;btn.setAttribute('aria-label','打开已下载的文件');}
+function markDownloaded(btn,entry){btn.className='secondary small done';btn.innerHTML=`${icon('file')}打开`;btn.dataset.saved=entry.id;btn.setAttribute('aria-label','打开已下载的文件');}
 async function bindAttachments(root,files){
  root.querySelectorAll('[data-preview]').forEach(b=>b.onclick=()=>busyButton(b,async()=>{try{await sdk.request('media.open',{url:files[b.dataset.preview].url});}catch(err){toast(err.message||'预览失败，请重试','err');}}));
  root.querySelectorAll('[data-download]').forEach(b=>b.onclick=()=>{
@@ -222,7 +212,7 @@ function openDay(k){
 }
 function openPending(){
  const list=pendingList();
- sheet(`待完成 · ${list.length} 项`,list.length?`<p class="section-label">按截止时间排序</p><div class="group stagger">${list.map((x,i)=>itemRow(x).replace('<button ',`<button style="--i:${i}" `)).join('')}</div>`:emptyState('没有待完成的作业和考试','check'),root=>bindItems(root));
+ sheet(`待完成 · ${list.length} 项`,list.length?`<p class="section-label">按截止时间排序</p><div class="group stagger">${list.map((x,i)=>itemRow(x).replace('<button ',`<button style="--i:${i}" `)).join('')}</div>`:emptyState('没有待完成的作业、课件和考试','check'),root=>bindItems(root));
 }
 function fact(ic,name,value,note='',urgent=false){return `<div class="row">${icon(ic)}<span class="row-copy"><small>${name}</small><span>${esc(value)}</span></span>${note?`<span class="fact-note${urgent?' urgent':''}">${esc(note)}</span>`:''}</div>`;}
 function openIgnored(){
@@ -244,8 +234,9 @@ function openItem(x){
   ((text||x.historical)?`<div class="detail-tags">${text?`<span class="pill ${cls}">${text}</span>`:''}${x.historical&&s!=='old'?'<span class="pill old">往期</span>':''}</div>`:'')+
   (facts.length?`<div class="group facts">${facts.join('')}</div>`:'')+
   (body?`<div class="body">${esc(body)}</div>`:'')+
-  (images.length?`<p class="section-label">图片 · ${images.length}</p><div class="media-grid">${images.map(i=>`<img class="media" src="${esc(i.url)}" alt="${esc(i.name||'公告图片')}" loading="lazy">`).join('')}</div>`:'')+
-  (files.length?`<p class="section-label">附件 · ${files.length}</p><div class="group">${files.map((a,n)=>`<div class="att" data-att="${n}"><div class="att-head"><span class="type-tile">${icon('file')}</span><span class="row-copy"><span class="att-name">${esc(a.name||'附件')}</span><small class="att-meta">${[fileExt(a.name),a.size?fileSize(a.size):''].filter(Boolean).join(' · ')||'附件'}</small></span></div><div class="att-actions"><button class="secondary small" data-preview="${n}">${icon('eye')}预览</button><button class="tonal small" data-download="${n}">${icon('download')}下载</button></div></div>`).join('')}</div>`:'')+
+  (x.category==='课件'?`<p class="footnote">${esc(COURSEWARE_PROGRESS_HINT)}</p><div class="courseware-actions"><button class="primary" id="official-courseware">前往雨课堂</button><button class="secondary" id="read-courseware">预览课件</button></div>`:'')+
+  (images.length?`<p class="section-label">图片 · ${images.length}</p><div class="media-grid">${images.map(i=>`<img class="media" src="${esc(i.url)}" alt="${esc(i.name||'公告图片')}" role="button" tabindex="0" aria-label="${esc(i.name||'公告图片')}，点击放大" loading="lazy">`).join('')}</div>`:'')+
+  (files.length?`<p class="section-label">附件 · ${files.length}</p><div class="group">${files.map((a,n)=>`<div class="att" data-att="${n}"><div class="att-head"><span class="type-tile">${icon('file')}</span><span class="row-copy"><span class="att-name">${esc(a.name||'附件')}</span><small class="att-meta">${[fileExt(a.name),a.size?fileSize(a.size):''].filter(Boolean).join(' · ')||'附件'}</small></span></div><div class="att-actions"><button class="tonal small" data-preview="${n}">${icon('eye')}预览</button><button class="secondary small" data-download="${n}">${icon('download')}下载</button></div></div>`).join('')}</div>`:'')+
   (!body&&!images.length&&!files.length?`<p class="footnote center">这条内容没有正文</p>`:''),
   root=>{
    const close=root.querySelector('#sheet-close');
@@ -260,10 +251,14 @@ function openItem(x){
    controls.append(ignore);close.before(controls);
    if(ignored){const hint=document.createElement('p');hint.className='banner info';hint.textContent='已忽略，不会出现在待完成小组件和提醒中。';root.querySelector('.sheet-body').prepend(hint);}
    bindAttachments(root,files);
-   root.querySelectorAll('img.media').forEach((im,idx)=>im.addEventListener('click',()=>openLightbox(images,idx)));
+   const official=root.querySelector('#official-courseware');
+   if(official)official.onclick=()=>busyButton(official,async()=>{try{await sdk.request('ui.openExternal',{url:coursewareOfficialUrl(x,data.settings?.site)});}catch(e){toast(e.message||'雨课堂打开失败，请重试','err');}});
+   const read=root.querySelector('#read-courseware');
+   if(read)read.onclick=()=>busyButton(read,async()=>{try{const {openCoursewareReader}=await import('./courseware-reader.js');openCoursewareReader(x);}catch(e){toast(e.message||'课件预览打开失败，请重试','err');}});
+   root.querySelectorAll('img.media').forEach((im,idx)=>{im.addEventListener('click',()=>openLightbox(images,idx));im.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openLightbox(images,idx);}});});
    root.querySelectorAll('img.media').forEach(i=>i.onerror=()=>{const b=document.createElement('button');b.className='secondary wide';b.innerHTML=`${icon('refresh')}图片加载失败，点击重试`;i.replaceWith(b);b.onclick=()=>{b.replaceWith(i);i.src=i.getAttribute('src');};});
   });
 }
 
 let widgetAboutOpened=false;
-sdk.subscribe(value=>{const was=data.loginState;snapshot=value;data=value.data;if(was!==data.loginState&&data.loginState!=='logged_in')document.getElementById('sheet')?.remove();render();if(value.context?.widgetAbout&&!widgetAboutOpened){widgetAboutOpened=true;setTimeout(openAbout,0);}});
+sdk.subscribe(value=>{const was=data.loginState;snapshot=value;data=value.data;readClock=snapshotClock(value.context?.nowMillis);if(was!==data.loginState&&data.loginState!=='logged_in')document.getElementById('sheet')?.remove();render();scheduleExpiry();if(value.context?.widgetAbout&&!widgetAboutOpened){widgetAboutOpened=true;setTimeout(openAbout,0);}});

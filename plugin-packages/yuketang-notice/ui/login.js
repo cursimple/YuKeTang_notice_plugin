@@ -1,25 +1,23 @@
 import {RainLoginClient, CAPTCHA_APP_ID} from './auth.js';
+import {sessionFetch} from './session-network.js';
+import {savedLoginNavigation} from './login-navigation.js';
 import {sdk, esc, icon, pickerSheet} from './shared.js';
 const $=id=>document.getElementById(id);
 const siteSpec=sdk.state.manifest.extension.settings.find(x=>x.key==='site');
 let site=sdk.state.data.settings.site || siteSpec.default;
-const makeClient=()=>new RainLoginClient({site,fetch:window.fetch.bind(window),cookie:name=>sdk.request('web.cookie',{name})});
-let client=makeClient(),mode='phone',generation=0,busy=false,cooldownUntil=0,qrExpiry=0,qrTotal=0,submitted=false,verified=false;
+const makeClient=()=>new RainLoginClient({site,fetch:sessionFetch(sdk,window.fetch.bind(window)),cookie:name=>sdk.request('web.cookie',{name})});
+let client=makeClient(),generation=0,busy=false,cooldownUntil=0,submitted=false,verified=false,completion=null;
+let routeVisible=true;
+const navigation=savedLoginNavigation({request:(command,payload)=>sdk.request(command,payload),
+ canNavigate:()=>routeVisible&&!document.hidden,onError:error=>{
+  failure(new Error(`账号已保存，但课堂页面未打开：${error.message||'请点击「查看我的课堂」重试'}`));
+  $('retry-session').hidden=true;
+ }});
 $('back').innerHTML=icon('back');
-$('refresh').innerHTML=icon('refresh');
 $('copy-error').innerHTML=icon('copy');
 $('error').insertAdjacentHTML('afterbegin',icon('alert'));
 $('hero-orb').innerHTML=icon('book');
 $('privacy-icon').outerHTML=icon('shield');
-function placeThumb(animate){
- const tabs=document.querySelector('.tabs'),thumb=tabs?.querySelector('.seg-thumb'),cur=tabs?.querySelector('[aria-selected="true"]');
- if(!thumb||!cur)return;
- if(!animate)thumb.style.transition='none';
- thumb.style.width=`${cur.offsetWidth}px`;thumb.style.transform=`translateX(${cur.offsetLeft}px)`;
- if(!animate){void thumb.offsetWidth;thumb.style.transition='';}
-}
-requestAnimationFrame(()=>placeThumb(false));
-window.addEventListener('resize',()=>placeThumb(false));
 const siteLabel=()=>siteSpec.options.find(x=>x.value===site)?.label||site;
 function renderSitePicker(){
  $('site-picker').innerHTML=`<button class="nav-row" id="site" type="button">${icon('globe')}<span class="row-copy"><small>学校站点</small><span>${esc(siteLabel())}</span></span><span class="value">切换</span><span class="chevron">${icon('next')}</span></button>`;
@@ -27,7 +25,7 @@ function renderSitePicker(){
 }
 async function switchSite(value){
  if(busy||verified||value===site)return;
- generation++;qrExpiry=0;client.cancel();
+ generation++;client.cancel();
  await task(async()=>{
   await sdk.request('settings.update',{site:value});
   site=value;client=makeClient();cooldownUntil=0;submitted=false;$('code').value='';
@@ -37,13 +35,13 @@ async function switchSite(value){
 renderSitePicker();
 function status(text,loading=false){const el=$('status');el.hidden=!text;el.innerHTML=(loading?'<span class="spinner"></span>':icon('info'))+`<span>${esc(text)}</span>`;}
 // Report the failed login stage with recovery guidance and a retry action.
-function failure(error,next='请在下方重试'){const raw=error?.message||String(error||'');let hint='';
+function failure(error){const raw=error?.message||String(error||'');let hint='';
  if(/超时|timeout/i.test(raw))hint='可能是网络较慢或校园网限制，检查网络后重试';
  else if(/网络|fetch|Failed/i.test(raw))hint='检查网络连接，或换一个雨课堂站点';
  else if(/验证码/.test(raw))hint='检查验证码是否正确、是否已过期，可重新获取';
  else if(/安全验证/.test(raw))hint='短信发送前必须完成官方安全验证';
  else if(/站点/.test(raw))hint='确认站点和学校一致后重试';
- else if(/过期/.test(raw))hint='重新获取验证码或刷新二维码';
+ else if(/过期/.test(raw))hint='重新获取短信验证码';
  $('error-text').textContent=[raw,hint?`（${hint}）`:''].filter(Boolean).join(' ');
  $('error').hidden=false;
  $('retry-session').hidden=!submitted;
@@ -53,14 +51,15 @@ function failure(error,next='请在下方重试'){const raw=error?.message||Stri
 function clearError(){$('error').hidden=true;$('retry-session').hidden=true;$('back-to-settings').hidden=true;$('back-to-settings').parentElement.hidden=true;}
 function controls(){
  if(verified)return;
+ const locked=busy;
  const remaining=Math.max(0,Math.ceil((cooldownUntil-Date.now())/1000));
- $('send').disabled=busy||remaining>0;$('send').classList.toggle('cooling',remaining>0);$('send').textContent=remaining?`${remaining} 秒后重发`:'获取验证码';
- $('verify').disabled=busy;$('verify').innerHTML=busy?'<span class="spinner"></span> 正在处理':'登录并连接';
- $('mobile').disabled=busy;$('code').disabled=busy;
- const siteButton=$('site');if(siteButton)siteButton.disabled=busy;
- $('phone-tab').disabled=busy;$('qr-tab').disabled=busy;$('retry-session').disabled=busy;
+ $('send').disabled=locked||remaining>0;$('send').classList.toggle('cooling',remaining>0);$('send').textContent=remaining?`${remaining} 秒后重发`:'获取验证码';
+ $('verify').disabled=locked;$('verify').innerHTML=busy?'<span class="spinner"></span> 正在处理':'登录并连接';
+ $('mobile').disabled=locked;$('code').disabled=locked;
+ const siteButton=$('site');if(siteButton)siteButton.disabled=locked;
+ $('retry-session').disabled=locked;
 }
-async function task(fn){if(busy||verified)return;busy=true;clearError();controls();try{await fn();}catch(e){if(e.name!=='AbortError')failure(e);}finally{busy=false;controls();}}
+async function task(fn){if(busy||verified)return;const stamp=generation;busy=true;clearError();controls();try{await fn();}catch(e){if(stamp===generation&&e.name!=='AbortError')failure(e);}finally{if(stamp===generation){busy=false;controls();}}}
 function captcha(){return new Promise((resolve,reject)=>{
  let settled=false;const end=(e,result)=>{if(settled)return;settled=true;clearTimeout(timeout);e?reject(e):resolve(result);};
  const timeout=setTimeout(()=>end(new Error('安全验证等待超时，请重新获取验证码')),120000);
@@ -69,7 +68,13 @@ function captcha(){return new Promise((resolve,reject)=>{
  const script=document.createElement('script');script.src='https://turing.captcha.qcloud.com/TCaptcha.js';script.onload=show;script.onerror=()=>end(new Error('安全验证加载失败，请检查网络后重试'));document.head.append(script);
 });}
 async function completed(stamp=generation){
- status(mode==='qr'?'扫码已确认，正在校验并保存账号…':'验证码已通过，正在校验并保存账号…',true);
+ if(verified||stamp!==generation)return;
+ if(completion)return completion;
+ const pending=completeAccount(stamp);completion=pending;
+ try{return await pending;}finally{if(completion===pending)completion=null;}
+}
+async function completeAccount(stamp){
+ status('验证码已通过，正在校验并保存账号…',true);
  let result;
  try{result=await sdk.request('login.check',{navigate:false});}
  catch(e){if(stamp===generation)status('');throw e;}
@@ -79,13 +84,17 @@ async function completed(stamp=generation){
   status('');
   throw new Error(`登录未被确认：${why}`);
  }
- document.activeElement?.blur();
- verified=true;qrExpiry=0;client.cancel();clearError();status('');
- $('login-card').innerHTML=`<div class="success-state"><div class="orb">${icon('check')}</div><h2>连接成功</h2><p>${esc(result.account?.name||'你的账号')}，欢迎回来</p><button class="primary" id="open-feed">${icon('calendar')}查看我的课堂</button><button class="secondary" id="open-settings">调整通知与显示设置</button></div>`;
- if($('site'))$('site').disabled=true;$('privacy-text').textContent='账号已保存，课简正在后台同步课堂内容。';
- $('open-feed').onclick=()=>sdk.request('ui.feed').catch(failure);$('open-settings').onclick=()=>sdk.request('ui.settings').catch(failure);
+ showSavedAccount(result);
+ requestAnimationFrame(()=>navigation.saved());
 }
-$('back').onclick=()=>{generation++;client.cancel();sdk.request('ui.close').catch(failure);};
+function showSavedAccount(result){
+ document.activeElement?.blur();
+ verified=true;client.cancel();clearError();status('');
+ $('login-card').innerHTML=`<div class="success-state"><div class="orb">${icon('check')}</div><h2>连接成功</h2><p>${esc(result.account?.name||'你的账号')}，欢迎回来</p><button class="primary" id="open-feed">${icon('calendar')}查看我的课堂</button><button class="secondary" id="open-settings">调整通知与显示设置</button></div>`;
+ if($('site'))$('site').disabled=true;$('privacy-text').textContent='账号已保存，正在进入我的课堂。';
+ $('open-feed').onclick=()=>navigation.retry();$('open-settings').onclick=()=>sdk.request('ui.settings').catch(failure);
+}
+$('back').onclick=()=>{generation++;client.cancel();busy=false;sdk.request('ui.close').catch(failure);};
 $('send').onclick=()=>task(async()=>{
  if(cooldownUntil>Date.now())return;
  const mobile=$('mobile').value.trim(),stamp=generation;submitted=false;
@@ -102,88 +111,6 @@ $('phone-panel').onsubmit=e=>{e.preventDefault();task(async()=>{
 $('retry-session').onclick=()=>task(()=>completed());
 $('back-to-settings').onclick=()=>sdk.request('ui.settings').catch(failure);
 $('copy-error').onclick=async()=>{const text=$('error-text').textContent;try{await navigator.clipboard.writeText(text);$('copy-error').innerHTML=icon('check');}catch{$('copy-error').innerHTML=icon('alert');}setTimeout(()=>$('copy-error').innerHTML=icon('copy'),1500);};
-function expired(){
- if(mode!=='qr'||verified)return;generation++;qrExpiry=0;qrTotal=0;client.cancel();
- $('qr-area').innerHTML=`<div class="qr-expired">${icon('refresh')}<strong>二维码已失效</strong><button class="primary" id="renew">点击刷新</button></div>`;
- $('renew').onclick=refreshQr;$('qr-countdown').textContent='已过期';
- const timer=$('qr-timer');if(timer){timer.style.setProperty('--p','0');timer.hidden=true;}
- status('请刷新二维码后重新扫码');
-}
-function tick(){
- controls();
- const timer=$('qr-timer');
- if(qrExpiry&&mode==='qr'&&!verified){
-  const remain=Math.max(0,qrExpiry-Date.now());
-  const seconds=Math.ceil(remain/1000);
-  $('qr-countdown').textContent=seconds?`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')} 后失效`:'已过期';
-  if(timer){timer.hidden=false;timer.style.setProperty('--p',qrTotal?String(Math.max(0,Math.min(1,remain/qrTotal))):'1');}
-  if(!seconds)expired();
- }else if(timer)timer.hidden=true;
-}
-async function showQr(content,expiresAt,stamp){
- if(stamp!==generation||mode!=='qr')return false;
- const image=await sdk.request('qr.encode',{text:content});
- if(stamp!==generation||mode!=='qr')return false;
- qrExpiry=expiresAt;qrTotal=Math.max(1,expiresAt-Date.now());
- $('qr-area').innerHTML=`<img class="qr" alt="微信登录二维码" src="${esc(image)}">`;
- if($('refresh'))$('refresh').disabled=false;tick();status('等待微信扫码确认');
- return true;
-}
-/** Prefer one WebSocket for QR and confirmation; use HTTPS polling only if connection fails. */
-function qrOverSocket(stamp){
- return new Promise((resolve,reject)=>{
-  const ws=new WebSocket(client.qrSocketUrl());
-  let done=false;
-  const finish=(error,value)=>{if(done)return;done=true;try{ws.close();}catch{}error?reject(error):resolve(value);};
-  ws.onopen=()=>ws.send(RainLoginClient.qrRequest());
-  ws.onmessage=async event=>{
-   if(stamp!==generation||mode!=='qr')return finish(new DOMException('cancelled','AbortError'));
-   const message=RainLoginClient.parseQrMessage(String(event.data));
-   if(!message)return;
-   if(message.type==='qr'){
-    await showQr(message.content,Date.now()+message.seconds*1000,stamp);
-    return;
-   }
-   if(message.type==='success'){
-    status('扫码已确认，正在建立登录会话…',true);
-    try{await client.establishSession(message.userId,message.auth);finish(null,true);}
-    catch(e){finish(e);}
-   }
-  };
-  ws.onerror=()=>finish(new Error('__ws_unavailable__'));
-  ws.onclose=()=>{if(!done&&qrExpiry&&Date.now()<qrExpiry)finish(new Error('__ws_closed__'));};
-  setTimeout(()=>finish(new Error('扫码等待超时，请刷新二维码重试')),5*60*1000);
- });
-}
-async function refreshQr(){
- if(verified||busy)return;const stamp=++generation;client.cancel();qrExpiry=0;clearError();$('qr-countdown').textContent='';$('refresh').disabled=true;
- $('qr-area').innerHTML='<span class="spinner"></span>';status('正在获取二维码…',true);
- try{
-  try{
-   await qrOverSocket(stamp);
-   if(stamp!==generation||mode!=='qr')return;
-   qrExpiry=0;submitted=true;await task(()=>completed(stamp));
-   return;
-  }catch(e){
-   if(e.name==='AbortError')return;
-   // Polling fallback applies only before a code arrives; later failures remain visible.
-   if(!/^__ws_/.test(e.message||''))throw e;
-  }
-  const challenge=await client.createQr();if(stamp!==generation||mode!=='qr')return;
-  await showQr(challenge.content,challenge.expiresAt,stamp);
-  await client.confirmQr(challenge,{onRotate:next=>{showQr(next.content,next.expiresAt,stamp);}});
-  if(stamp!==generation||mode!=='qr')return;
-  qrExpiry=0;submitted=true;await task(()=>completed(stamp));
- }catch(e){if(stamp===generation&&mode==='qr'&&e.name!=='AbortError'){qrExpiry=0;$('qr-area').innerHTML=`<div class="qr-expired">${icon('alert')}<strong>二维码获取失败</strong><button class="primary" id="renew">重新获取</button></div>`;$('renew').onclick=refreshQr;$('qr-countdown').textContent='';failure(e);}}
- finally{if(stamp===generation&&$('refresh'))$('refresh').disabled=false;}
-}
-function changeMode(next){if(busy||verified||mode===next)return;generation++;client.cancel();qrExpiry=0;mode=next;clearError();
- const show=$(next==='qr'?'qr-panel':'phone-panel');
- $('phone-panel').hidden=next!=='phone';$('qr-panel').hidden=next!=='qr';
- show.classList.remove('panel-in-r','panel-in-l');void show.offsetWidth;show.classList.add(next==='qr'?'panel-in-r':'panel-in-l');
- $('phone-tab').setAttribute('aria-selected',String(next==='phone'));$('qr-tab').setAttribute('aria-selected',String(next==='qr'));placeThumb(true);
- if(next==='qr')refreshQr();else status('');}
-$('phone-tab').onclick=()=>changeMode('phone');$('qr-tab').onclick=()=>changeMode('qr');$('refresh').onclick=refreshQr;
 /**
  * Adjust the fixed login page to the actual keyboard height, keeping fields and submission
  * visible.
@@ -204,6 +131,19 @@ function lift(){
 const relift=()=>{clearTimeout(liftTimer);liftTimer=setTimeout(lift,60);};
 document.addEventListener('focusin',relift);document.addEventListener('focusout',()=>setTimeout(lift,120));
 window.visualViewport?.addEventListener('resize',relift);window.addEventListener('resize',relift);
-// Only sheet content scrolls; the login page remains fixed.
-document.addEventListener('touchmove',e=>{if(!e.target.closest?.('.sheet-body,.lightbox'))e.preventDefault();},{passive:false});
-const timer=setInterval(tick,250);window.addEventListener('pagehide',()=>{generation++;client.cancel();clearInterval(timer);});
+// Large text and recovery actions can scroll inside the fixed login viewport.
+document.addEventListener('touchmove',e=>{if(!e.target.closest?.('.sheet-body,.lightbox,.login-page'))e.preventDefault();},{passive:false});
+const timer=setInterval(controls,1000);
+function stopLogin(){generation++;client.cancel();busy=false;controls();}
+window.addEventListener('pagehide',()=>{routeVisible=false;stopLogin();navigation.close();clearInterval(timer);});
+window.addEventListener('cursimple-visibility',event=>{
+ routeVisible=event.detail?.visible!==false;
+ if(!routeVisible)stopLogin();else if(verified)navigation.resume();
+});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&verified)navigation.resume();});
+// A saved host session remains valid when this document is reopened after returning to the app.
+sdk.subscribe(state=>{
+ if(!verified&&!busy&&!completion&&state.data?.loginState==='logged_in'){
+  showSavedAccount(state.data);requestAnimationFrame(()=>navigation.saved());
+ }
+});

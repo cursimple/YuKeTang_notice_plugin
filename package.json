@@ -5,5 +5,8 @@
   "scripts": {
     "test": "node --test test/",
     "pack": "bash scripts/pack.sh"
+  },
+  "devDependencies": {
+    "pdfjs-dist": "6.4.299"
   }
 }
