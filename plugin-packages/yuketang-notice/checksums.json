@@ -3,7 +3,7 @@
   "files": {
     "assets/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "main.js": "e5f422fba1f50f3be0baf4fe5c26c1e6462a9a2d48861e3181a2107ff4884c4e",
-    "manifest.json": "7a2f2e35d81929e55e5cfb9c814254208188cd42b05f72d78f2cfb9af9aa3cb4",
+    "manifest.json": "e4705f68e78fb9567c530027b7a28125292aa7891ee485fc845ac96e05be8eb4",
     "ui/auth.js": "1f1bca08ea0cc859146ced3727d6e58b7e979cd8a741db3f9baa3fdbda3efab3",
     "ui/component.css": "5ac42153b6687554d712e371c40bb42181a0053b6def651c8e83288c654d3a72",
     "ui/courseware-api.js": "5160c43258332d8b1cab8a5a220f3e272c45bafc365a64068cc0fb48a6deb9bb",

@@ -16,7 +16,7 @@ The component owns authentication, synchronization and its login/settings/calend
 
 ## Installation and sign-in
 
-Current local version: **1.3.8**.
+Current local version: **1.3.9**.
 
 Requires plugin **API 11** or later; unsupported hosts reject installation.
 
@@ -96,6 +96,6 @@ The component declares its own desktop widget in `extension.widgets`. `ui/widget
 
 The local preview uses Mozilla PDF.js (Apache-2.0) with a real two-page PDF for paging, zooming, and downloads. Run `npm ci` before `node scripts/preview-server.mjs`. Preview dependencies and fixtures stay outside the component ZIP. Images use compact thumbnails and open at full size on click.
 
-Local 1.3.8: first sign-in schedules one sync that survives navigation. The reader supports tap zoom, double-tap reset, pinch, swipe and portrait/landscape controls. Rotation keeps the page and zoom; closing restores the previous orientation. All 28 layouts in the real courseware response were checked, with page 19 visually verified in the browser. On-phone rotation and post-login sync remain unverified.
+Local 1.3.9 renews the session passively from response headers and persists the rotation across sync runs; see "登录续期" in the Chinese README. Local 1.3.8: first sign-in schedules one sync that survives navigation. The reader supports tap zoom, double-tap reset, pinch, swipe and portrait/landscape controls. Rotation keeps the page and zoom; closing restores the previous orientation. All 28 layouts in the real courseware response were checked, with page 19 visually verified in the browser. On-phone rotation and post-login sync remain unverified.
 
 Back closes the top image or courseware viewer before leaving its detail sheet or component. Courseware prefers available originals and complete supported layouts while retaining signed and cropped URLs. Retrying a failed high-resolution page refreshes its courseware metadata instead of repeatedly using an expired URL; thumbnail-only pages remain explicitly identified.
