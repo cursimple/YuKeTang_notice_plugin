@@ -1,5 +1,5 @@
 import {sdk,esc,icon,iconButton,sheet,selectField,bindAll,toast,friendlyTime,pickerSheet} from './shared.js';
-import {normalizeAvatarUrl} from '../main.js';
+import {normalizeAvatarUrl,pageSession} from '../main.js';
 const app=document.getElementById('app'),clone=v=>JSON.parse(JSON.stringify(v));
 let state=sdk.state,busy='',panel='',first=true,refreshTimer=0,downloads=null;
 const fileSize=b=>b>=1048576?`${(b/1048576).toFixed(1)} MB`:`${Math.max(1,Math.round(b/1024))} KB`;
@@ -27,6 +27,8 @@ async function action(command,payload={},{quiet=true}={}){
  if(command==='sync'){busy='sync';render();}
  try{
   const result=await sdk.request(command,payload);
+  // A saved session is gone; the persisted rotation must not outlive it.
+  if(command==='logout')pageSession.reset();
   if(result?.host)state={...state,data:result};
   if(command==='sync')toast(result?.count!=null?`同步完成 · ${result.count} 条内容`:'同步完成');
   else if(!quiet)toast('已保存');

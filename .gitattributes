@@ -1,0 +1,5 @@
+# Checksums cover file bytes, so line endings must not depend on the checkout platform.
+# CI packs on Linux (LF); without this, a Windows checkout with core.autocrlf=true would
+# produce a bundle whose SHA-256 values never match the committed checksums.json.
+* text=auto eol=lf
+*.png binary

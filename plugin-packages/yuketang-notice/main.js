@@ -25,6 +25,249 @@ const COURSEWARE_LEAF_TYPES = new Set([7, 14]);
 
 class LoginRequiredError extends Error {}
 
+/*
+ * Passive session renewal.
+ *
+ * The platform never exposes a refresh endpoint: it rotates credentials on ordinary
+ * responses instead. `Set-Auth` carries a new bearer token and `Set-Cookie` refreshes
+ * `csrftoken` / `sessionid`, which is why the official app renews by simply re-reading every
+ * response and reusing the result for the next request.
+ *
+ * The rotation is persisted, because a sync run is a fresh JS context: keeping it in memory
+ * alone would drop every rotated token at the end of the run and force the next run to start
+ * from whatever the cookie jar happens to hold. Storage is supplied by the caller —
+ * `ctx.state` in the entry bundle, `localStorage` in an owned page — and carries the site it
+ * belongs to, so switching schools cannot resume another session.
+ *
+ * Cookies are still owned by the host cookie jar: writing a duplicate from script would
+ * shadow an HttpOnly cookie, so the copies here are only used to send an accurate
+ * `X-CSRFToken` before the jar is consulted.
+ */
+const AUTH_HEADERS = ["set-auth", "x-set-auth"];
+const CSRF_COOKIE = "csrftoken";
+/** Component-private persistent slot for the rotated credentials. */
+const SESSION_STATE_KEY = "session";
+
+/** Read one header case-insensitively from Headers, a pair list or a plain object. */
+export function headerValue(headers, name) {
+  if (!headers || !name) return "";
+  if (typeof headers.get === "function") {
+    try { return String(headers.get(name) ?? ""); } catch (_) { return ""; }
+  }
+  const want = String(name).toLowerCase();
+  if (Array.isArray(headers)) {
+    for (const pair of headers) {
+      if (Array.isArray(pair) && String(pair[0]).toLowerCase() === want) return String(pair[1] ?? "");
+    }
+    return "";
+  }
+  if (typeof headers === "object") {
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === want) return String(headers[key] ?? "");
+    }
+  }
+  return "";
+}
+
+/**
+ * Split `Set-Cookie` into name/value pairs. Commas also appear inside `Expires=Wed, 21 Oct
+ * ...`, so only a comma followed by `name=` starts a new cookie.
+ */
+export function parseSetCookie(raw) {
+  const out = [];
+  for (const value of Array.isArray(raw) ? raw : [raw]) {
+    if (typeof value !== "string" || !value.trim()) continue;
+    for (const chunk of value.split(/,(?=\s*[^;,=\s]+=)/)) {
+      const pair = chunk.split(";")[0];
+      const at = pair.indexOf("=");
+      if (at <= 0) continue;
+      const name = pair.slice(0, at).trim();
+      if (name) out.push({ name, value: pair.slice(at + 1).trim() });
+    }
+  }
+  return out;
+}
+
+/** `Set-Auth` may already carry the scheme; requests always send `Bearer <token>`. */
+const bareToken = (value) => String(value || "").trim().replace(/^bearer\s+/i, "").trim();
+
+export function createSessionTokens(initial = {}, options = {}) {
+  const { load, save, identity = "" } = options;
+  let auth = "";
+  let csrf = "";
+  const cookies = Object.create(null);
+  let revision = 0;
+  let current = String(identity || "");
+
+  /** Clear in-memory credentials without touching storage. */
+  function clear() {
+    auth = "";
+    csrf = "";
+    for (const key of Object.keys(cookies)) delete cookies[key];
+  }
+
+  /** Hydrate a persisted rotation; a session stored for another site is not reusable. */
+  function hydrate() {
+    clear();
+    if (!load) return false;
+    let saved = null;
+    try { saved = load(); } catch (_) { return false; }
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return false;
+    // Refuse to resume a session whose origin is known to differ. An unknown identity (a
+    // page that has not sent a request yet) adopts whatever was stored.
+    if (current && saved.identity != null && String(saved.identity) !== current) return false;
+    if (!current && saved.identity != null) current = String(saved.identity);
+    auth = bareToken(saved.auth);
+    csrf = String(saved.csrf || "").trim();
+    for (const [name, value] of Object.entries(saved.cookies || {})) {
+      if (name && value) cookies[name] = String(value);
+    }
+    revision += 1;
+    return Boolean(auth || csrf || Object.keys(cookies).length);
+  }
+
+  function persist() {
+    if (!save) return;
+    const value = { identity: current, auth, csrf, cookies: { ...cookies } };
+    try { save(value); } catch (_) {}
+  }
+
+  function bump() {
+    revision += 1;
+    persist();
+  }
+
+  for (const [name, value] of Object.entries(initial.cookies || {})) {
+    if (name && value) cookies[name] = String(value);
+  }
+  auth = bareToken(initial.auth);
+  csrf = String(initial.csrf || "").trim();
+  // An explicit initial value wins; otherwise resume whatever was persisted.
+  if (!auth && !csrf && !Object.keys(cookies).length) hydrate();
+
+  /** Record one cookie; returns true when a stored credential actually moved. */
+  function remember(name, value) {
+    const key = String(name || "").trim();
+    if (!key) return false;
+    const next = value == null ? "" : String(value).trim();
+    let changed = false;
+    if (!next) {
+      // An empty value is a deletion notice, so the previous secret must not survive.
+      if (key in cookies) { delete cookies[key]; changed = true; }
+    } else if (cookies[key] !== next) {
+      cookies[key] = next;
+      changed = true;
+    }
+    if (key === CSRF_COOKIE && csrf !== next) { csrf = next; changed = true; }
+    return changed;
+  }
+
+  // Core recorder: no revision bump, so public entry points count one change per response.
+  function applySetCookie(raw) {
+    let changed = false;
+    for (const { name, value } of parseSetCookie(raw)) {
+      if (remember(name, value)) changed = true;
+    }
+    return changed;
+  }
+
+  function absorbSetCookie(raw) {
+    const changed = applySetCookie(raw);
+    if (changed) bump();
+    return changed;
+  }
+
+  function applyHeaders(headers) {
+    let changed = false;
+    for (const name of AUTH_HEADERS) {
+      const token = bareToken(headerValue(headers, name));
+      if (token && token !== auth) { auth = token; changed = true; }
+    }
+    const cookie = headerValue(headers, "set-cookie");
+    if (cookie && applySetCookie(cookie)) changed = true;
+    return changed;
+  }
+
+  function absorbHeaders(headers) {
+    const changed = applyHeaders(headers);
+    if (changed) bump();
+    return changed;
+  }
+
+  /** Absorb whatever the transport exposed; unsupported header access is not an error. */
+  function absorbResponse(response) {
+    if (!response) return false;
+    let changed = applyHeaders(response.headers);
+    const setAuth = bareToken(response.setAuth ?? response.set_auth ?? "");
+    if (setAuth && setAuth !== auth) { auth = setAuth; changed = true; }
+    const setCookie = response.setCookie ?? response.set_cookie ?? "";
+    if (setCookie && applySetCookie(setCookie)) changed = true;
+    if (changed) bump();
+    return changed;
+  }
+
+  return {
+    absorbHeaders,
+    absorbResponse,
+    absorbSetCookie,
+    authorization: () => (auth ? `Bearer ${auth}` : ""),
+    csrf: (fallback = "") => csrf || String(fallback || "").trim(),
+    cookie: (name, fallback = "") => cookies[String(name || "")] || String(fallback || ""),
+    /** Rotated credentials win over caller-supplied values, which are stale by definition. */
+    headers(extra = {}) {
+      const merged = { ...(extra || {}) };
+      const token = auth ? `Bearer ${auth}` : "";
+      if (token) merged.Authorization = token;
+      if (csrf) merged["X-CSRFToken"] = csrf;
+      return merged;
+    },
+    /** Point the store at another site; credentials from a different one are dropped. */
+    setIdentity(next) {
+      const site = String(next || "");
+      if (site === current) return false;
+      current = site;
+      clear();
+      revision += 1;
+      return hydrate();
+    },
+    get auth() { return auth; },
+    get revision() { return revision; },
+    get identity() { return current; },
+    snapshot: () => ({ identity: current, auth, csrf, cookies: { ...cookies } }),
+    /** Discard a dead session, including the persisted copy. */
+    reset() {
+      clear();
+      bump();
+    },
+  };
+}
+
+/**
+ * Owned pages persist to `localStorage`; the entry bundle has no DOM and uses `ctx.state`
+ * instead. Absent storage is not an error, it just means no resumption.
+ */
+const PAGE_SESSION_KEY = "ykt-session";
+
+function readPageSession() {
+  try {
+    const raw = globalThis.localStorage?.getItem(PAGE_SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
+function writePageSession(value) {
+  try {
+    const store = globalThis.localStorage;
+    if (!store) return;
+    const empty = !value || (!value.auth && !value.csrf && !Object.keys(value.cookies || {}).length);
+    if (empty) store.removeItem(PAGE_SESSION_KEY);
+    else store.setItem(PAGE_SESSION_KEY, JSON.stringify(value));
+  } catch (_) {}
+}
+
+/** One store per owned page, so every request on that page shares the rotation. */
+export const pageSession = createSessionTokens({}, { load: readPageSession, save: writePageSession });
+
 /** Avatar URLs must work inside the host's HTTPS page. */
 export function normalizeAvatarUrl(value) {
   if (typeof value !== "string") return "";
@@ -65,7 +308,7 @@ export async function checkLogin(ctx) {
     const account = await api.account(courses);
     return { loggedIn: true, account };
   } catch (error) {
-    if (error instanceof LoginRequiredError) return { loggedIn: false };
+    if (error instanceof LoginRequiredError) { forgetSession(ctx); return { loggedIn: false }; }
     throw error;
   }
 }
@@ -87,7 +330,7 @@ export async function sync(ctx) {
     courses = await api.courses();
     account = await api.account(courses);
   } catch (error) {
-    if (error instanceof LoginRequiredError) return { loginRequired: true };
+    if (error instanceof LoginRequiredError) { forgetSession(ctx); return { loginRequired: true }; }
     throw error;
   }
 
@@ -354,28 +597,35 @@ function createApi(ctx) {
   // Shared only within this sync. Reading progress must refresh on the next run.
   const activityRequests = new Map();
   const taskRequests = new Map();
+  // Credentials rotated by earlier responses. Persisted through ctx.state, because each sync
+  // run is a fresh JS context; see createSessionTokens.
+  const session = createSessionTokens({}, {
+    identity: site,
+    load: () => (ctx.state?.get ? ctx.state.get(SESSION_STATE_KEY) : null),
+    save: (value) => ctx.state?.set?.(SESSION_STATE_KEY, value),
+  });
+  const sessionCookie = (name) => session.cookie(name, ctx.web?.cookie ? ctx.web.cookie(name) : cookieFromDocument(name));
 
   function csrf() {
-    const raw = ctx.web?.cookie ? ctx.web.cookie("csrftoken") : cookieFromDocument("csrftoken");
-    return raw || "";
+    return session.csrf(sessionCookie(CSRF_COOKIE));
   }
 
   // These endpoint families require xtbz; x-client: app selects an incompatible authentication path.
   function v3Headers(cid) {
-    const headers = {
+    const headers = session.headers({
       xtbz: "ykt",
       "university-id": String(universityId),
       "uv-id": String(universityId),
       "Xt-Agent": "web",
       "X-Client": "web",
       "X-CSRFToken": csrf(),
-    };
+    });
     if (cid != null) headers["classroom-id"] = String(cid);
     return headers;
   }
 
   function moocHeaders(cid) {
-    return {
+    return session.headers({
       xtbz: "ykt",
       "xt-agent": "web",
       "X-Client": "web",
@@ -383,7 +633,7 @@ function createApi(ctx) {
       "university-id": "0",
       "classroom-id": String(cid),
       "X-CSRFToken": csrf(),
-    };
+    });
   }
 
   async function getJson(path, headers, timeoutMs = 0) {
@@ -394,9 +644,12 @@ function createApi(ctx) {
       const response = await ctx.network.fetch(`${base}${path}`, {
         method: "GET",
         credentials: "include",
-        headers: { Accept: "application/json, text/plain, */*", ...(headers || {}) },
+        // Rotated credentials from an earlier response replace the ones prepared above.
+        headers: session.headers({ Accept: "application/json, text/plain, */*", ...(headers || {}) }),
         ...(controller ? { signal: controller.signal } : {}),
       });
+      // The platform renews the session here rather than through a refresh endpoint.
+      session.absorbResponse(response);
       if (response.status === 401) throw new LoginRequiredError("登录已失效");
       if (!response.ok) throw new Error(`HTTP ${response.status} ${path}`);
       const text = await response.text();
@@ -716,6 +969,15 @@ function loadState(ctx) {
     exams: state.exams && typeof state.exams === "object" ? state.exams : {},
     courseware: state.courseware && typeof state.courseware === "object" ? state.courseware : {},
   };
+}
+
+/**
+ * Drop the persisted rotation. A dead session must not be resumed, and the next run would
+ * otherwise keep sending a token the platform already rejected.
+ */
+function forgetSession(ctx) {
+  if (!ctx.state?.set) return;
+  try { ctx.state.set(SESSION_STATE_KEY, null); } catch (_) {}
 }
 
 /** Prune cache entries unused for two months. */

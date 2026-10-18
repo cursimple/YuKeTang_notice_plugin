@@ -81,6 +81,19 @@
 
 截止时间和交卷状态会缓存在组件自己的存储里，已完成、已截止的条目不再重复请求。
 
+### 登录续期
+
+雨课堂没有 `refresh_token` 之类的续期接口，续期是**被动**的：普通响应的 `Set-Auth` 头会下发新的 bearer token，`Set-Cookie` 会顺带刷新 `csrftoken` / `sessionid`。官方 App 的拦截器就是每收到一个响应就把这两样读回来、下一个请求直接复用，所以它从来不“调接口续期”。
+
+组件采用同一套机制（`main.js` 的 `createSessionTokens` / `pageSession`）：
+
+- `getJson`、`sessionFetch`、课件读取三处请求都会 `absorbResponse`，把 `Set-Auth` 和 `Set-Cookie` 收进来；
+- 后续请求的 `Authorization` / `X-CSRFToken` 以轮换后的值为准，调用方传入的旧值会被覆盖；
+- **轮换结果会持久化**：同步是每分钟一次的全新 JS 上下文，只存内存等于每次从头开始。入口包写 `ctx.state`，自有页面写 `localStorage`；
+- 持久化副本带站点身份，换站点时旧凭据立即作废，不会把 A 校的 token 发到 B 校；
+- Cookie 仍归宿主的 cookie jar 所有（脚本写一份同名 cookie 反而会遮蔽 HttpOnly 的那个），这里存的值只用来在 jar 被问之前拼出正确的 `X-CSRFToken`；
+- 真失效时仍是原来的行为：`401` / `UNAUTHENTICATED` → `loginRequired` → 提醒重新登录，同时**清掉**持久化副本，避免下次拿死 token 重试。
+
 ## 开发
 
 ```bash

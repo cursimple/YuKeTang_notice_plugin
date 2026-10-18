@@ -1,4 +1,4 @@
-import { normalizeAvatarUrl } from '../main.js';
+import { normalizeAvatarUrl, pageSession } from '../main.js';
 import { normalizeSlideLayout, originalSlideImageUrl } from './courseware-layout.js';
 
 export const COURSEWARE_PROGRESS_HINT = '请前往雨课堂查看，完成情况会在下次同步时按雨课堂记录更新。';
@@ -58,8 +58,14 @@ export async function readCourseware(item, { site, fetch: fetcher = globalThis.f
   const { classroomId, cardsId } = coursewareReference(item);
   const host = coursewareHost(site);
   const url = `https://${host}/v2/api/web/cards/detlist/${cardsId}?classroom_id=${classroomId}`;
-  const response = await fetcher(url, { method: 'GET', credentials: 'include', signal });
-  if (response.status === 401) throw new Error('登录已失效，请重新登录雨课堂');
+  const response = await fetcher(url, {
+    method: 'GET', credentials: 'include', signal,
+    // A rotated csrftoken from an earlier response must not be shadowed by a stale one.
+    headers: pageSession.headers(),
+  });
+  // Capture any credential rotation the platform attached to this response.
+  pageSession.absorbResponse(response);
+  if (response.status === 401) { pageSession.reset(); throw new Error('登录已失效，请重新登录雨课堂'); }
   if (!response.ok) throw new Error(response.status === 403 ? '雨课堂未开放这份课件的阅读权限' : '课件读取失败，请重试');
   const text = await response.text();
   let json;
